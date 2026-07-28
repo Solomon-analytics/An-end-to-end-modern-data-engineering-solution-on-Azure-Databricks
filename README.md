@@ -110,6 +110,45 @@ None of this is unusual. It is what production data looks like, and handling it 
 
 ## 4. The solution
 
+# Defining project requirements
+
+1. Data ingestion requirements
+2. Data transformation requirements
+3.  Reporting and analytical requirements
+4.  Non-functional requirements
+
+1. Data ingestion requirements:
+   - ingest all dataset into the Date Lakehouse
+   - Apply correct schema (columns and datatypes)
+   - Add audit columns (ingestion timestamp, source file)
+   - Data must in Delta format
+   - Preserve Data integrity and Reliability
+   - For static data - full load will be applied
+   - For batch data - incremental load will be applied
+     
+2. Data transformation requirements
+   - clean and standardise data
+   - Apply consistent naming convention and reshape structure
+   - Remove unnecessary columns and handle basic data quality checks
+   - Apply data quality flags that ensure data meets business requirement
+   - Preserve business keys across layers
+   - Prepare dataset for Gold-layer analytics
+     
+3.  Reporting and analytical requirements
+   - Optimised for reporting and analytical queries
+   - Support recent and historical analysis
+   - Optimised for reporting an
+     
+4.  Non-functional requirements
+   - Scheduled and reliable pipeline execution
+   - Monitoring, recovery, and alerting
+   - Time travel, rollback, and Delta reliability
+
+
+## 4.1 Setting up the Project Environment
+- Setup Data Lake environment
+- Configure unity catalog
+
 ### 4.1 Storage: the enterprise data landing zone
 
 Kestrel's source systems export to a central cloud storage account rather than pushing directly into any analytics tool. This is the standard enterprise pattern: storage is cheap, source teams own their exports, and the analytics platform reads rather than receives.
