@@ -160,13 +160,42 @@ None of this is unusual. It is what production data looks like, and handling it 
  - create the second notebook in (00-comkon) folder - "02.bronze-helpers" - in this notebook, create two functions, add_ingestion_metadata and write_to_bronze
 
 ## 4.2 Ingesting ALL static/sct type tables from from landing to bronze Notebook
-  - considering our fact files will be arriving in batches, we set a parameter "p_batch_id"
+  - considering our fact files will be arriving in batches, we set a parameter "p_batch_id" for each notebooks
   - Call each of the notebooks(environment-configuration and 02.bronze-helpers) : "%run ../00-common/01.environment-configuration" and "%run ../00-common/02.bronze-helpers"
-  - Create a vairble for source file and target table9bronze)
+  - Create a variable for source file and target table(bronze)
   - create a schema for table
   - read All table to its defined schema
   - Add ingestion metadata
   - Write to bronze, matching on batch_id
+
+## 4.2 Ingesting ALL fact datasets from landing to bronze
+ - considering our fact files will be arriving in batches, we set a parameter "p_batch_id" for each notebooks
+ - in the storage account, we create a nested folder for each dataset using the parameter "p_batch_id". example 2024-01 --> sales order --> 2024-01 --> file.parquet
+ - in the (00-commom folder --> 01.environment-configuration notebook, add variable for each of fact dataset
+ - Call each of the notebooks(environment-configuration and 02.bronze-helpers) : "%run ../00-common/01.environment-configuration" and "%run ../00-common/02.bronze-helpers"
+ - create a schema for table
+ - read All table to its defined schema
+ - Add ingestion metadata
+ - Write to bronze, matching on batch_id
+
+## 4.2 Transforming and ingesting tables from bronze-silver: Requirement
+ - Read all files using spark dataframe reader API
+ - filter column, batch_id == v_batch_id
+ - Keep only the columns required for analytics
+ - Standardise all column headers using snake_case
+ - Rename columns to business meaningful names
+ - setup loggings for audit purpose
+ - remove nulls from business keys
+ - Remove duplicates
+ - Transform values in string columns to title_case
+ - Apply business transformation rules
+ - Write transformed data to silver table
+
+
+## 4.2 Ingesting ALL static/scd tables from bronze-silver - setting up
+ - in the 00-commoin folder, create a new notebook (silver-helpers) - this will hold the basic_transformation and write_to_silver functions
+ - Create a write to function that picks up the latest data using (source.batch_id >= target.batch_id)
+
 
 
 
