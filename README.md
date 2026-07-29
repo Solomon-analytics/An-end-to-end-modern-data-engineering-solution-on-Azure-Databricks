@@ -148,6 +148,40 @@ None of this is unusual. It is what production data looks like, and handling it 
 ## 4.1 Setting up the Project Environment
 - Setup Data Lake environment
 - Configure unity catalog
+- set up ADLS
+- set managed location (ADLS C=container) in Databricks
+- set up Catalog in Databricks
+- set up schemas (landing, bronze, silver and gold)
+- set up external volume in the landing layer
+
+## 4.2 Ingesting from landing to bronze - setting up parameter and environmental functions and variables
+ - Dynamically setting up an environment configuration: Create a new folder in the project folder (00-common). in this folder create a notebook(environment-configuration)
+ - environment configiration should have the folowing variable (catalog_name, bronze_schema, silver_schema, gold_schema, control_schema and landing_folder_path)
+ - create the second notebook in (00-comkon) folder - "02.bronze-helpers" - in this notebook, create two functions, add_ingestion_metadata and write_to_bronze
+
+## 4.2 Ingesting ALL static/sct type tables from from landing to bronze Notebook
+  - considering our fact files will be arriving in batches, we set a parameter "p_batch_id"
+  - Call each of the notebooks(environment-configuration and 02.bronze-helpers) : "%run ../00-common/01.environment-configuration" and "%run ../00-common/02.bronze-helpers"
+  - Create a vairble for source file and target table9bronze)
+  - create a schema for table
+  - read All table to its defined schema
+  - Add ingestion metadata
+  - Write to bronze, matching on batch_id
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ### 4.1 Storage: the enterprise data landing zone
 
