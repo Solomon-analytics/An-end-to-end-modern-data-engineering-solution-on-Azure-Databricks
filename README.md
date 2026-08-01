@@ -86,9 +86,8 @@ Source systems export on a monthly cycle. Each export produces a dated batch, an
 
 A `_manifest.csv` accompanies the batches, recording table, partition, row count, load timestamp and file size.
 
-### The data is disparate and it is not clean
+### The data quality and standardisation issues:
 
-This is the heart of the engineering problem.
 
 **Different formats.** Transactional data arrives as Parquet with typed schemas. Reference data arrives as CSV, produced by whoever owns the spreadsheet. Two file formats, two levels of reliability, one pipeline.
 
@@ -110,373 +109,304 @@ None of this is unusual. It is what production data looks like, and handling it 
 
 ## 4. The solution
 
-# Defining project requirements
+## 1. Requirements
 
-1. Data ingestion requirements
-2. Data transformation requirements
-3.  Reporting and analytical requirements
-4.  Non-functional requirements
+### 1.1 Data ingestion
 
-1. Data ingestion requirements:
-   - ingest all dataset into the Date Lakehouse
-   - Apply correct schema (columns and datatypes)
-   - Add audit columns (ingestion timestamp, source file)
-   - Data must in Delta format
-   - Preserve Data integrity and Reliability
-   - For static data - full load will be applied
-   - For batch data - incremental load will be applied
-     
-2. Data transformation requirements
-   - clean and standardise data
-   - Apply consistent naming convention and reshape structure
-   - Remove unnecessary columns and handle basic data quality checks
-   - Apply data quality flags that ensure data meets business requirement
-   - Preserve business keys across layers
-   - Prepare dataset for Gold-layer analytics
-     
-3.  Reporting and analytical requirements
-   - Optimised for reporting and analytical queries
-   - Support recent and historical analysis
-   - Optimised for reporting an
-     
-4.  Non-functional requirements
-   - Scheduled and reliable pipeline execution
-   - Monitoring, recovery, and alerting
-   - Time travel, rollback, and Delta reliability
-
-
-## 4.1 Setting up the Project Environment
-- Setup Data Lake environment
-- Configure unity catalog
-- set up ADLS
-- set managed location (ADLS C=container) in Databricks
-- set up Catalog in Databricks
-- set up schemas (landing, bronze, silver and gold)
-- set up external volume in the landing layer
-
-## 4.2 Ingesting from landing to bronze - setting up parameter and environmental functions and variables
- - Dynamically setting up an environment configuration: Create a new folder in the project folder (00-common). in this folder create a notebook(environment-configuration)
- - environment configiration should have the folowing variable (catalog_name, bronze_schema, silver_schema, gold_schema, control_schema and landing_folder_path)
- - create the second notebook in (00-comkon) folder - "02.bronze-helpers" - in this notebook, create two functions, add_ingestion_metadata and write_to_bronze
-
-## 4.2 Ingesting ALL static/sct type tables from from landing to bronze Notebook
-  - considering our fact files will be arriving in batches, we set a parameter "p_batch_id" for each notebooks
-  - Call each of the notebooks(environment-configuration and 02.bronze-helpers) : "%run ../00-common/01.environment-configuration" and "%run ../00-common/02.bronze-helpers"
-  - Create a variable for source file and target table(bronze)
-  - create a schema for table
-  - read All table to its defined schema
-  - Add ingestion metadata
-  - Write to bronze, matching on batch_id
-
-## 4.2 Ingesting ALL fact datasets from landing to bronze
- - considering our fact files will be arriving in batches, we set a parameter "p_batch_id" for each notebooks
- - in the storage account, we create a nested folder for each dataset using the parameter "p_batch_id". example 2024-01 --> sales order --> 2024-01 --> file.parquet
- - in the (00-commom folder --> 01.environment-configuration notebook, add variable for each of fact dataset
- - Call each of the notebooks(environment-configuration and 02.bronze-helpers) : "%run ../00-common/01.environment-configuration" and "%run ../00-common/02.bronze-helpers"
- - create a schema for table
- - read All table to its defined schema
- - Add ingestion metadata
- - Write to bronze, matching on batch_id
-
-## 4.2 Transforming and ingesting tables from bronze-silver: Requirement
- - Read all files using spark dataframe reader API
- - filter column, batch_id == v_batch_id
- - Keep only the columns required for analytics
- - Standardise all column headers using snake_case
- - Rename columns to business meaningful names
- - setup loggings for audit purpose
- - remove nulls from business keys
- - Remove duplicates
- - Transform values in string columns to title_case
- - Apply business transformation rules
- - Write transformed data to silver table
-
-
-## 4.2 Ingesting ALL static/scd tables from bronze-silver - setting up
- - in the 00-commoin folder, create a new notebook (silver-helpers) - this will hold the basic_transformation and write_to_silver functions
- - Create a write to function that picks up the latest data using (source.batch_id >= target.batch_id)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-### 4.1 Storage: the enterprise data landing zone
-
-Kestrel's source systems export to a central cloud storage account rather than pushing directly into any analytics tool. This is the standard enterprise pattern: storage is cheap, source teams own their exports, and the analytics platform reads rather than receives.
-
-The landing zone is implemented as an **Azure Data Lake Storage Gen2** account with hierarchical namespace enabled, organised into containers by purpose:
-
-```
-kestrelstorage/
-├── landing/          incoming batch files, immutable
-│   ├── orders_2025/
-│   │   ├── order_month=2025-01/
-│   │   └── order_month=2025-02/
-│   ├── order_line_items/
-│   ├── invoices/
-│   ├── payments/
-│   └── _static/      reference CSVs
-├── archive/          processed batches, retained
-└── quarantine/       rejected records
-```
-
-Files landed here are never modified. They are the system of record for what the source systems actually sent, which is what makes the pipeline auditable.
-
-### 4.2 Platform: Azure Databricks
-
-The solution is built on **Azure Databricks**, chosen because it handles the full workload in one place: file ingestion at volume, transformation in PySpark, ACID guarantees through Delta Lake, governance through Unity Catalog, and scheduling through Workflows. There is no separate ingestion tool, no separate orchestrator and no separate catalogue to keep in sync.
-
-### 4.3 Governance: Unity Catalog
-
-Everything is registered in **Unity Catalog** before any data is loaded. Governance first, not retrofitted.
-
-**Catalog**
-
-```
-kestrel_analytics
-```
-
-**Schemas, one per layer**
-
-| Schema | Purpose |
+| # | Requirement |
 |---|---|
-| `landing` | Volumes pointing at raw files |
-| `bronze` | Raw ingested tables, one per source |
-| `silver` | Cleaned, conformed, quality-checked |
-| `gold` | Dimensional model |
-| `analytics` | Reporting views and aggregates |
-| `control` | Batch control and audit tables |
+| ING-01 | Ingest all source datasets into the lakehouse without transformation |
+| ING-02 | Apply an explicit schema to every source, so a source change fails loudly rather than silently |
+| ING-03 | Add audit columns to every row: ingestion timestamp, source file, batch identifier |
+| ING-04 | Store all tables in Delta format |
+| ING-05 | Static reference data is fully reloaded on each run |
+| ING-06 | Batched transactional data is loaded incrementally, one batch per run |
+| ING-07 | Reprocessing a batch must replace it, never duplicate it |
 
-**Workspace folder structure, mirroring the schemas**
+### 1.2 Data transformation
 
-```
-/Workspace/kestrel_cascade/
-├── 00_setup/            catalog, schemas, external locations, volumes
-├── 01_landing/          file discovery and batch identification
-├── 02_bronze/           landing to bronze notebooks
-├── 03_silver/           bronze to silver notebooks
-├── 04_gold/             silver to gold notebooks
-├── 05_analytics/        reporting views
-├── 06_orchestration/    control table and job task notebooks
-└── 99_utils/            shared functions
-```
-
-The mapping between folder, schema and job task is deliberate. Anyone opening the workspace can see the shape of the pipeline without reading any code.
-
-### 4.4 Connecting the lake: external location and landing volume
-
-Databricks reaches the storage account through governed Unity Catalog objects rather than mounted paths or access keys.
-
-**Storage credential.** An Azure Databricks Access Connector provides a managed identity, granted **Storage Blob Data Contributor** on the storage account. No secrets, no keys in notebooks.
-
-**External location.** Registered against the container, bound to that credential:
-
-```sql
-CREATE EXTERNAL LOCATION kestrel_landing
-URL 'abfss://landing@kestrelstorage.dfs.core.windows.net/'
-WITH (STORAGE CREDENTIAL kestrel_managed_identity);
-```
-
-**External volume.** Files are exposed to notebooks as a governed volume path:
-
-```sql
-CREATE EXTERNAL VOLUME kestrel_analytics.landing.raw_files
-LOCATION 'abfss://landing@kestrelstorage.dfs.core.windows.net/';
-```
-
-Notebooks then read `/Volumes/kestrel_analytics/landing/raw_files/...` as an ordinary path. Access is governed by Unity Catalog permissions, and every read is captured in lineage.
-
-### 4.5 Landing to bronze
-
-Bronze holds the source data exactly as delivered, with provenance attached. No business logic, no filtering, no cleaning.
-
-Each batch is ingested with a **`p_batch_id` parameter** passed in from the orchestration job, which identifies precisely which batch this run is processing.
-
-**Metadata columns added to every bronze table:**
-
-| Column | Purpose |
+| # | Requirement |
 |---|---|
-| `p_batch_id` | The batch this row belongs to |
-| `_source_file` | Full path of the file it came from |
-| `_source_system` | Originating system |
-| `_ingested_at` | Ingestion timestamp |
-| `_ingested_by` | Job run identifier |
+| TRF-01 | Standardise column names to snake_case and rename to business-meaningful terms |
+| TRF-02 | Remove columns not required for analytics |
+| TRF-03 | Trim and normalise whitespace in string columns |
+| TRF-04 | Remove rows where a business key is null |
+| TRF-05 | Deduplicate on the declared business key, deterministically |
+| TRF-06 | Flag data quality issues rather than silently dropping rows |
+| TRF-07 | Preserve source business keys across all layers for traceability |
+| TRF-08 | Log row counts at each stage for audit |
+| TRF-09 | Apply business transformation rules |
+| TRF-10 | Produce a dataset ready for dimensional modelling in gold |
 
-These five columns give row-level traceability. Any figure in the final report can be traced back to the file that produced it, which directly addresses the auditability problem in section 2.
+### 1.3 Reporting and analytics
 
-**Load pattern.** Delete by `p_batch_id`, then insert. Reprocessing a batch replaces it cleanly rather than duplicating it, so the load is idempotent by construction.
-
-**Schema evolution** is enabled so a new source column, such as `order_source` appearing in 2026, lands in bronze rather than failing the job. Whether it is used downstream is a silver decision, not an ingestion one.
-
-### 4.6 Bronze to silver
-
-Silver is where the data becomes usable. One table per business entity, cleaned, conformed and quality-checked.
-
-**Structural conformance**
-
-- The three order extracts are unioned into a single `silver.orders`, with legacy columns renamed to the current standard
-- Value vocabularies are normalised: `DELIVERED` and `Delivered` become one value, `STD` and `Standard` become one value
-- Columns present in only some extracts are handled explicitly, not by accident
-
-**Cleaning**
-
-- Types cast and enforced
-- Strings trimmed, casing standardised
-- Excel artefacts removed, such as the leading apostrophe on phone numbers
-- Duplicate master records resolved on a documented survivorship rule
-
-**Data quality flags**
-
-Rather than dropping suspect rows, silver **flags** them. Every record carries its quality assessment and continues downstream, so the business can see what is wrong rather than having it quietly removed.
-
-| Column | Meaning |
+| # | Requirement |
 |---|---|
-| `dq_status` | `PASS`, `WARN` or `FAIL` |
-| `dq_rules_failed` | Array of rule identifiers that failed |
-| `dq_checked_at` | When the assessment ran |
+| RPT-01 | Model optimised for analytical query patterns rather than transactional access |
+| RPT-02 | Support both current-period and historical analysis |
+| RPT-03 | Historical figures must remain stable when reference data changes |
+| RPT-04 | Every reported figure traceable to a source file and batch |
+| RPT-05 | Expose data quality status to consumers rather than concealing it |
 
-Rules are catalogued with a severity. Critical failures, such as a null business key or a broken parent relationship, route the record to `quarantine` with its rule identifier attached. Warnings, such as an out-of-range date, are flagged and passed through.
+### 1.4 Non-functional
 
-Nothing is ever silently dropped. If a row does not reach gold, there is a record explaining why.
-
-**Merge logic**
-
-Silver loads use a Delta `MERGE` on the business key: update where the key exists and the record has changed, insert where it does not. This handles both corrections to previously loaded records and the late-arriving records described in section 2.
-
-**Audit logging**
-
-Every silver load writes to `control.audit_log`:
-
-| Column | Purpose |
+| # | Requirement |
 |---|---|
-| `audit_id` | Unique run identifier |
-| `p_batch_id` | Batch processed |
-| `table_name` | Target table |
-| `layer` | Pipeline layer |
-| `rows_read` | Input count |
-| `rows_inserted` | New records |
-| `rows_updated` | Changed records |
-| `rows_quarantined` | Rejected records |
-| `started_at` / `ended_at` | Timing |
-| `status` | Outcome |
-| `error_message` | Failure detail |
-
-Combined with Delta time travel, this gives a complete record of what changed, when, and as a result of which batch.
-
-### 4.7 Silver to gold
-
-Gold restructures conformed data into a dimensional model built for analysis rather than for processing.
-
-**Fact table**
-
-| Table | Grain |
-|---|---|
-| `fct_sales` | One row per order line |
-
-Order line measures, with invoice and payment status carried down from the parent order. Shipments and payments are collapsed to one row per order before joining, so the fan-out does not inflate the fact.
-
-**Dimensions**
-
-| Table | Type |
-|---|---|
-| `dim_customer` | Slowly changing, Type 2 |
-| `dim_product` | Slowly changing, Type 2 |
-| `dim_date` | Generated, full calendar |
-| `dim_channel` | Type 1 |
-| `dim_geography` | Type 1, role-playing for bill-to and ship-to |
-
-**Business columns added at this layer:** net line value with discount correctly applied, margin against product cost, sterling equivalent using the rate for the invoice month, order-to-invoice and invoice-to-payment day counts, and derived status flags.
-
-Dimensions carry surrogate keys. Facts join on the surrogate valid at the transaction date, so historical reporting stays correct when a customer moves region. This directly addresses the retrospective-change problem in section 2.
-
-Referential integrity is enforced before load: no fact row reaches gold without a valid dimension key, and unmatched keys resolve to an explicit unknown member rather than being dropped.
-
-### 4.8 Analytics layer
-
-The `analytics` schema exposes the model to reporting through views, so consumers never query gold tables directly and the physical model can change without breaking reports.
-
-| View | Purpose |
-|---|---|
-| `vw_sales_performance` | Revenue, margin and volume by customer, product and month |
-| `vw_order_to_cash` | Ordered, invoiced and collected value with the gap at each step |
-| `vw_customer_360` | Customer profile with trading history and payment behaviour |
-| `vw_product_performance` | SKU performance against stock position |
-| `vw_target_attainment` | Regional actuals against regional targets |
-| `vw_data_quality_summary` | Quality flags and quarantine counts by batch |
-
-That final view matters. Exposing data quality to the business, rather than hiding it, is what makes the platform trustworthy.
-
-A **Power BI** semantic model sits on the analytics layer, connected through the Databricks SQL connector.
-
-### 4.9 Orchestration
-
-The pipeline runs as a single **Databricks Workflow**, driven by a control table.
-
-**Control table** `control.batch_control`:
-
-| Column | Purpose |
-|---|---|
-| `batch_id` | Batch identifier |
-| `source_feed` | Which feed this batch belongs to |
-| `status` | `pending`, `in-progress`, `completed`, `failed` |
-| `row_count` | Records processed |
-| `created_timestamp` | First seen |
-| `updated_timestamp` | Last state change |
-| `error_message` | Failure detail |
-
-**Job structure**
-
-```
-get_next_batch          identify the earliest unprocessed batch
-       ↓
-check_has_batch         condition task
-       ↓ true                    ↓ false
-mark_in_progress                end, success
-       ↓
-landing_to_bronze
-       ↓
-bronze_to_silver
-       ↓
-silver_to_gold
-       ↓
-refresh_analytics
-       ↓
-mark_completed
-```
-
-A `mark_failed` task runs on the failure path of any processing task, setting the batch to `failed` so it becomes eligible again on the next run rather than being stuck.
-
-**Task values** pass `p_batch_id` between tasks, so every notebook in the run operates on the same batch without hardcoding.
-
-**Concurrency** is capped at one run, preventing two runs from claiming the same batch.
-
-The job is scheduled. It checks for new batches, processes what it finds, and exits cleanly when there is nothing to do. No manual intervention, which is the point.
+| NFR-01 | Pipeline runs on a schedule without manual intervention |
+| NFR-02 | A failed run must be recoverable without manual data cleanup |
+| NFR-03 | Batch processing state visible and queryable at all times |
+| NFR-04 | Delta time travel and rollback available on every table |
+| NFR-05 | Row counts, rejections and failures logged for every run |
 
 ---
 
-## 5. What this delivers
+## 2. Environment setup
 
-Against the problems in section 2:
+### 2.1 Storage and governance
 
-| Problem | Resolution |
+| Step | Detail |
 |---|---|
-| No single source of truth | One governed model in Unity Catalog, all sources conformed |
-| Manual, unscalable reporting | Automated pipeline, no spreadsheets |
-| ERP migration broke continuity | Three schemas unioned and normalised into one history |
-| Late and out-of-order data | Merge logic and lookback handle arrivals whenever they land |
-| No history, retrospective change | Type 2 dimensions preserve point-in-time truth |
-| No audit trail | Row-level provenance, audit log, Delta time travel |
-| Cannot prove where a number came from | Every figure traces to a batch, a file and a load run |
+| Platform | Databricks Free Edition, serverless compute |
+| Governance | Unity Catalog, one metastore assigned to the workspace |
+| Storage | Databricks-managed. No external cloud storage account is used |
+| Catalog | `kestrel_data_eng_prj`, created without an explicit managed location so it inherits the metastore default |
+| Landing volume | Managed volume `landing.files`, created without a location clause |
+| File delivery | Batch folders uploaded to the volume through Catalog Explorer |
+
+### 2.2 Catalog structure
+
+```
+kestrel_data_eng_prj
+├── landing     managed volume holding the raw file drop
+├── bronze      raw ingest, one table per source
+├── silver      cleaned and conformed
+├── gold        dimensional model
+└── control     batch control and audit tables
+```
+
+Created once, in `00-setup`:
+
+```sql
+CREATE CATALOG IF NOT EXISTS kestrel_data_eng_prj;
+USE CATALOG kestrel_data_eng_prj;
+
+CREATE SCHEMA IF NOT EXISTS landing;
+CREATE SCHEMA IF NOT EXISTS bronze;
+CREATE SCHEMA IF NOT EXISTS silver;
+CREATE SCHEMA IF NOT EXISTS gold;
+CREATE SCHEMA IF NOT EXISTS control;
+
+CREATE VOLUME IF NOT EXISTS kestrel_data_eng_prj.landing.files;
+```
+
+No `MANAGED LOCATION` clause is given on the catalog and no `LOCATION` on the volume, so both use the metastore's default Databricks-managed storage.
+
+### 2.3 Production equivalent
+
+The landing zone here is a Unity Catalog **managed** volume, because Free Edition does not support custom storage locations.
+
+In a production deployment the same layer would be an **external** volume over an ADLS Gen2 container, registered as a Unity Catalog external location and authenticated with a managed identity storage credential:
+
+```sql
+CREATE EXTERNAL LOCATION kestrel_landing
+  URL 'abfss://landing@<storage-account>.dfs.core.windows.net/'
+  WITH (STORAGE CREDENTIAL kestrel_managed_identity);
+
+CREATE EXTERNAL VOLUME kestrel_data_eng_prj.landing.files
+  LOCATION 'abfss://landing@<storage-account>.dfs.core.windows.net/';
+```
+
+**The pipeline code is identical either way.** Both resolve to a governed `/Volumes/...` path, so every notebook, every path variable and every `dbutils.fs` call works unchanged. Only the object definition differs.
+
+### 2.4 Notebook structure
+
+```
+/kestrel_data_eng_prj/
+├── 00-common/
+│   ├── 01.environment-configuration
+│   ├── 02.bronze-helpers
+│   └── 03.silver-helpers
+├── 01-bronze/
+├── 02-silver/
+├── 03-gold/
+└── 04-orchestration/
+```
+
+Folder names mirror the schemas, so the shape of the pipeline is visible from the workspace tree without reading any code.
+
+---
+
+## 3. Shared components
+
+Rather than repeating configuration and write logic in every notebook, three shared notebooks sit in `00-common` and are pulled in with `%run` wherever they are needed. A change to the write pattern happens in one place and applies everywhere.
+
+| Notebook | Holds | Used by |
+|---|---|---|
+| `01.environment-configuration` | Catalog and schema names, the landing volume path, a path variable per source dataset. Configuration only, no logic | Every notebook |
+| `02.bronze-helpers` | `add_ingestion_metadata`, `write_to_bronze` | Bronze notebooks |
+| `03.silver-helpers` | `trim_whitespaces`, `remove_nulls`, `remove_duplicates`, `write_to_silver` | Silver notebooks |
+
+**What the bronze helpers do.** `add_ingestion_metadata` attaches an ingestion timestamp and the originating file path to every row, using Spark's built-in `_metadata` column so provenance does not have to be assembled by hand for each reader. `write_to_bronze` stamps the batch identifier onto the data and writes it as a Delta table partitioned by `batch_id`, using `replaceWhere` so that reprocessing a batch replaces it in place rather than appending a second copy.
+
+**What the silver helpers do.** `trim_whitespaces` normalises leading, trailing and repeated internal whitespace across string columns only, leaving typed columns untouched. `remove_nulls` and `remove_duplicates` handle business key integrity. `write_to_silver` creates the Delta table on first run and merges on the business key thereafter, guarded so that an older batch cannot overwrite newer data, and preserving the original creation timestamp when a row is updated.
+
+> Source: `00-common/01.environment-configuration`, `02.bronze-helpers`, `03.silver-helpers`
+
+---
+
+## 4. Landing to bronze
+
+### 4.1 What this layer is for
+
+Bronze holds the source data exactly as delivered, with provenance attached. No cleaning, no filtering, no business logic. Its purpose is to be the auditable record of what the source actually sent, so that any downstream figure can be traced back to a physical file.
+
+### 4.2 What was set up
+
+**A batch folder convention in the landing volume.** Files are uploaded into a folder per batch. Static reference files sit at the batch root; batched transactional datasets sit under a named subfolder, because they carry their own event-month partition.
+
+```
+/Volumes/kestrel_data_eng_prj/landing/files/
+└── 2025-01/
+    ├── Address.csv
+    ├── sales_order/2025-01/part-000.parquet
+    └── sales_order_lines/2025-01/part-000.parquet
+```
+
+**A `p_batch_id` parameter on every bronze notebook.** Declared as a widget and read into a variable at the top of each notebook. The same notebook therefore serves both the initial backfill and every incremental run, with nothing hardcoded and no separate code path to maintain.
+
+**One notebook per source table.** Each builds its source path and target table name from the shared configuration, declares the schema, reads the file, attaches metadata and writes to bronze. The notebooks are short and near-identical by design, because all the reusable logic lives in `00-common`.
+
+**Explicit schemas on CSV sources.** Every CSV is read against a declared `StructType` with `mode=FAILFAST`, so a source adding, removing or renaming a column fails the batch loudly instead of silently producing nulls. Parquet sources are read without a declared schema, since Parquet is self-describing and declaring one requires the physical types to match exactly, failing on differences as minor as `bigint` against `int`. Type casting for those sources happens in silver.
+
+### 4.3 What each run does
+
+1. Reads the batch identifier from the notebook parameter
+2. Loads shared configuration and helper functions
+3. Resolves the source file path for that batch and the target bronze table
+4. Reads the file, with a declared schema where the format requires one
+5. Attaches the ingestion timestamp and source file path to every row
+6. Stamps the batch identifier on and writes to Delta, partitioned by batch
+
+### 4.4 Decisions worth recording
+
+| Decision | Reasoning |
+|---|---|
+| Explicit schema with `FAILFAST` on CSV | A source schema change should fail the batch, not produce silent nulls |
+| Partition by `batch_id` | Makes `replaceWhere` cheap and lets a single batch be reprocessed in isolation |
+| `overwrite` with `replaceWhere` rather than `append` | Reprocessing replaces the batch instead of duplicating it, which is what makes the load idempotent |
+| Parameterised rather than dated notebooks | One code path for backfill and incremental load |
+| Metadata attached before write | Provenance recorded at the point of ingest, not reconstructed afterwards |
+| No transformation in bronze | Preserves the auditable record of what the source sent |
+
+> Source: `01-bronze/` — one notebook per table. `01.address` is the reference implementation for a CSV source; `05.sales-order-lines` for a Parquet source.
+
+---
+
+## 5. Bronze to silver
+
+### 5.1 What this layer is for
+
+Silver is where the data becomes usable. Columns are renamed to business terms, values are cleaned and conformed, quality issues are assessed and flagged, and rows are merged on the business key so that corrections and lifecycle updates from later batches land in place rather than accumulating as duplicates.
+
+### 5.2 What was set up
+
+**A shared silver helper notebook**, holding the cleaning functions and the merge. As with bronze, the per-table notebooks stay short.
+
+**A rename map per table**, applied on read, converting source column names to business-meaningful snake_case. `line_id` becomes `order_line_id`, `sku` becomes `product_sku`, `quantity` becomes `line_quantity`, and so on. Source technical columns not required downstream are dropped at the same point.
+
+**Row count logging at each stage.** The incoming count, the count after removing null business keys, and the count after deduplication are printed on every run. Any unexplained movement in row count is therefore visible immediately rather than discovered weeks later in a report.
+
+**Data quality flags rather than filters.** Where a row is suspect but usable, it is tagged and passed through. Only rows whose business key is null are removed, because such a row cannot be merged, joined or traced and has no downstream use.
+
+**A merge on the declared business key**, with a guard preventing an older batch from overwriting newer data. This matters because the source feeds arrive on different event clocks: an order raised in January can be invoiced in February and paid in May, so batches do not arrive in a single ordered sequence.
+
+### 5.3 What each run does
+
+1. Reads the batch identifier from the notebook parameter
+2. Loads shared configuration and helper functions
+3. Reads the bronze table, filtered to the current batch
+4. Drops columns not required downstream and renames the rest to business terms
+5. Records the incoming row count
+6. Trims and normalises whitespace across string columns
+7. Applies the data quality flags defined for that table
+8. Removes rows with a null business key, logging the count
+9. Deduplicates on the business key, logging the count
+10. Applies business transformation rules
+11. Merges into the silver table on the business key
+
+### 5.4 Decisions worth recording
+
+| Decision | Reasoning |
+|---|---|
+| Filter bronze to the current batch | Silver processes one batch per run, matching the orchestration |
+| Merge on the business key rather than append | Handles corrections and lifecycle updates arriving in later batches |
+| Batch guard on the merge condition | Prevents an out-of-order batch overwriting newer data |
+| Flag quality issues, do not drop | Consumers can see what is wrong rather than having rows silently removed |
+| Drop only on a null business key | Such a row cannot be merged, joined or traced |
+| Preserve `created_timestamp` on update | Retains when a record first entered the warehouse; only `updated_timestamp` moves |
+| Row counts logged at every stage | Unexplained movement becomes visible on the run, not in a report |
+
+> Source: `02-silver/` — one notebook per table. `05.sales-order-lines` is the reference implementation.
+
+### 5.5 Business key and merge condition per table
+
+| Silver table | Merged on |
+|---|---|
+| `sales_order` | `order_id` |
+| `sales_order_lines` | `order_line_id` |
+| `invoice` | `invoice_no` |
+| `invoice_lines` | `invoice_no` + `line_no` |
+| `shipments` | `shipment_id` |
+| `payment` | `payment_id` |
+| `address` | `customer_id` + `address_type` |
+
+Where a natural composite key exists and is stable, it is preferred. Where the only stable identifier is the one supplied by the source, that is used and the dependency is recorded as an assumption. Candidate composites containing a mutable column, such as an amount or a date, were rejected: a correction changing that value would prevent the merge from matching the original row, inserting a duplicate rather than updating in place.
+
+---
+
+## 6. Data quality findings
+
+Two issues were investigated in `sales_order_lines`. Both are flagged rather than resolved, because neither can be resolved from the data available.
+
+**Identical lines under different keys.** A small number of order lines share the same order, product, quantity, unit price and discount, differing only in `order_line_id`. The table carries no line number and no requested delivery date, so a deliberately split line cannot be distinguished from an accidental re-key. Tagged as `sales_identical_flag` for the business to review.
+
+The same investigation confirmed that `order_id + product_sku` is **not** the grain of this table. Lines legitimately repeat the same product where different portions attract different discount tiers, so a portion at the volume rate and a portion at full price appear as two lines. Deduplicating on that combination would have destroyed valid revenue lines. `order_line_id` is the only column expressing the grain, and is therefore the merge key.
+
+**Missing product key.** A proportion of lines arrive with no `product_sku`. These are not dropped: they carry real revenue, and removing them would understate group totals with no error to indicate it had happened. Tagged as `product_is_null_flag` and routed to an explicit unknown product member when the fact is built in gold.
+
+Analysis showed that `line_unit_price` identifies the product for the large majority of these rows, which indicates the SKU exists in the source system and is being lost during extraction rather than being genuinely unknown. This is published as a data quality finding rather than applied as a fix. Deriving a business key from a measure would couple the fact's key to a dimension attribute and break whenever a price changed, and it would mask a source defect that ought to be corrected upstream.
+
+> Source: `02-silver/05.sales-order-lines` contains the investigation queries, retained as commented cells.
+
+---
+
+## 7. Audit and traceability
+
+Every silver row carries the full chain back to source:
+
+| Column | Set by | Answers |
+|---|---|---|
+| `batch_id` | Job parameter | Which batch delivered this row |
+| `source_file` | Spark `_metadata` at ingest | Which physical file it came from |
+| `ingestion_timestamp` | Bronze write | When it landed |
+| `created_timestamp` | Silver first write | When the row first appeared in silver |
+| `updated_timestamp` | Silver merge | When it was last changed |
+
+Combined with Delta time travel on every table, any figure in a report can be traced to the file that produced it and the run that loaded it, and the state of any table at any past point can be reconstructed.
+
+---
+
+## 8. Notebook index
+
+| Path | Purpose |
+|---|---|
+| `00-common/01.environment-configuration` | Catalog, schema and path variables |
+| `00-common/02.bronze-helpers` | Ingestion metadata and bronze write |
+| `00-common/03.silver-helpers` | Cleaning functions and silver merge |
+| `01-bronze/` | One notebook per source table, landing to bronze |
+| `02-silver/` | One notebook per table, bronze to silver |
+| `03-gold/` | Dimensional model |
+| `04-orchestration/` | Control table and job task notebooks |
+
+
 
