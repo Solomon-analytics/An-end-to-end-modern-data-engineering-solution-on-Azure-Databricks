@@ -203,7 +203,7 @@ No `MANAGED LOCATION` clause is given on the catalog and no `LOCATION` on the vo
 
 ### 2.3 Production equivalent
 
-The landing zone here is a Unity Catalog **managed** volume, because Free Edition does not support custom storage locations.
+The landing zone here is a Unity Catalog **managed** volume.
 
 In a production deployment the same layer would be an **external** volume over an ADLS Gen2 container, registered as a Unity Catalog external location and authenticated with a managed identity storage credential:
 
