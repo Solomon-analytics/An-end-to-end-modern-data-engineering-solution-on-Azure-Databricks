@@ -103,7 +103,7 @@ A `_manifest.csv` accompanies the batches, recording table, partition, row count
 
 **Genuine defects.** Duplicate customer IDs in the master file. Null SKUs on order lines. Order headers with no lines attached. Missing invoice totals. Phone numbers exported from Excel with a leading apostrophe. A missing month in the targets file.
 
-None of this is unusual. It is what production data looks like, and handling it is the job.
+
 
 ---
 
