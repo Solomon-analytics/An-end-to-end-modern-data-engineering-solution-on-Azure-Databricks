@@ -364,6 +364,117 @@ Where a natural composite key exists and is stable, it is preferred. Where the o
 
 ---
 
+# Gold Layer
+
+`docs/06-gold-layer.md`
+
+Silver holds clean, conformed data. Gold restructures it into a dimensional model built for analysis.
+
+---
+
+## Requirements
+
+**Model.** Star schema with conformed dimensions. One fact per business event, at its own grain.
+
+**Keys.** Every dimension carries a surrogate key generated deterministically from its business key, so it survives a rebuild unchanged. Facts join on surrogate keys; natural keys are retained alongside for traceability.
+
+**Grain.** Each fact must hold its declared grain. Row count in equals row count out.
+
+**No loss.** Left joins throughout. A missing dimension match must not remove a fact row.
+
+**Business columns.** Derived measures and attributes belong here, not in silver: net values, currency conversion, cycle times, durations, date keys and status flags.
+
+**Idempotency.** Rebuilding produces the same result. Writes merge on the business key rather than appending.
+
+---
+
+## The model
+
+| Table | Grain | Built from |
+|---|---|---|
+| `dim_customer` | Customer | cust_master, address (ship-to), cities, regions |
+| `dim_customer_account` | Customer account | cust_master, address (bill-to), cities, regions |
+| `dim_product` | SKU | products, product_sub_categories |
+| `dim_campaign` | Campaign | campaign_log |
+| `fact_sales_order` | Order | sales_order, invoice, payment, exchange_rates, channels |
+| `fact_sales_order_lines` | Order line | sales_order_lines |
+| `fact_shipment` | Shipment | shipment |
+| `fact_campaign` | Campaign per day | campaign_log |
+| `bridge_campaign_product` | Campaign to SKU | campaign_sku |
+
+**Build order.** Dimensions first, then `fact_sales_order`, then the facts that inherit from it (`lines`, `shipment`), then the bridge. Each stage depends on the one before.
+
+---
+
+## Common pattern
+
+Every notebook follows the same shape:
+
+1. Declare the `p_batch_id` widget
+2. `%run` the shared configuration and `04.gold-helpers`
+3. Define source and target table variables
+4. **Explore** each silver source: grain, business key, key uniqueness, null checks
+5. **Validate** the driver table before building: row count, key distinct, key not null
+6. Build the dataframe: join, select, derive
+7. **Validate** the output: row count unchanged, no duplicate surrogate key
+8. Write via `write_to_gold`
+
+Exploration queries are retained as commented cells, so the reasoning behind each design choice stays with the code.
+
+### Shared helper
+
+`00-common/04.gold-helpers` holds `write_to_gold`, which creates the Delta table on first run and merges on the business key thereafter. `created_timestamp` is excluded from the update map so it survives; only `updated_timestamp` moves.
+
+Unlike the silver helper there is no batch guard, because gold rebuilds from the full silver history each run and the latest write is always the more complete picture.
+
+---
+
+## Steps taken, by table
+
+### dim_customer
+Explored cust_master, address, cities and regions to establish grain. Found `customer_id` not unique, so deduplicated to the latest `customer_created_date`. Joined the ship-to address, then city and region. Generated `customer_sk` by hashing `customer_id`.
+
+### dim_customer_account
+Same sources, different purpose: account-level attributes not held on the customer. Credit limit, payment terms, account manager, active flag and created date. Joined the bill-to address rather than ship-to. Added `account_is_update` to mark records superseded by a later creation date, and derived the created date in both date and `yyyyMMdd` key form. Generated `bill_to_account_sk`.
+
+### dim_product
+Confirmed `product_sku` unique across 1,200 rows. Joined product sub-categories to bring the category hierarchy through. Cast and rounded price and cost. Generated `product_sk`.
+
+### dim_campaign
+Campaign attributes arrive denormalised on the daily campaign log, repeated on every row. Aggregated to campaign grain, then added `campaign_sk`, `campaign_duration_days` (inclusive of both endpoints) and date keys for start and end.
+
+### fact_sales_order
+Validated `order_number` distinct and not null. Pre-aggregated payments from payment grain to invoice grain before joining, so multiple payments on one invoice could not fan out the fact. Joined invoice, exchange rates, both customer dimensions and channels, all left. Converted invoice totals to sterling by matching the invoice date to its rate month. Derived order, invoice and payment dates plus `yyyyMMdd` keys for each.
+
+### fact_sales_order_lines
+Validated the driver at 42,055 rows. Joined to `fact_sales_order` to inherit order context down to line grain, and to `dim_product` for the product key. Added `net_line_value`, applying the discount that the source `line_total` omits. Row count confirmed unchanged after both joins.
+
+### fact_shipment
+Validated `shipment_id` as the grain. Joined to `fact_sales_order` for order context. Generated `shipment_sk`. Derived three date keys and three cycle-time measures: order to ship, transit, and order to delivery. Added delivery status flags so an undelivered shipment reads as in transit rather than an unexplained null. Added split-shipment context per order using window functions: shipment count, sequence, and flags for split, multi-carrier and final shipment.
+
+### fact_campaign
+Campaign events at campaign and day grain. Retrieved `campaign_sk` from `dim_campaign` and derived a date key from the log date, keeping impressions, clicks and spend as the measures.
+
+### bridge_campaign_product
+Campaign to SKU is many-to-many: a campaign covers several products and a product appears in several campaigns. Read the mapping from silver, resolved both surrogate keys from the gold dimensions, and wrote a two-column bridge connecting them.
+
+---
+
+## Key decisions
+
+**Surrogate keys are hashed, not sequential.** `xxhash64` on the business key is deterministic, so a full rebuild produces identical keys and no fact is orphaned.
+
+**Facts select surrogate keys from the dimension**, rather than recomputing the hash. If a dimension changes how its key is built, the facts follow automatically.
+
+**One-to-many sources are pre-aggregated before joining.** Payments to invoice grain, so the order fact cannot fan out. Row count validation after each join proves it.
+
+**Business rules live in gold.** The discount that silver preserves as delivered is applied here as `net_line_value`, alongside the original `line_total` so the two can be compared.
+
+**Shipments are their own fact.** Carrier cannot collapse to order grain, since split orders frequently ship via more than one carrier. Order-level shipment context is derived with window functions instead.
+
+**Ratios are not stored.** Campaign measures are held as components; click-through and cost-per-click are derived in the reporting layer, because ratios do not aggregate.
+
+
 ## 6. Data quality findings
 
 Two issues were investigated in `sales_order_lines`. Both are flagged rather than resolved, because neither can be resolved from the data available.
@@ -379,34 +490,4 @@ Analysis showed that `line_unit_price` identifies the product for the large majo
 > Source: `02-silver/05.sales-order-lines` contains the investigation queries, retained as commented cells.
 
 ---
-
-## 7. Audit and traceability
-
-Every silver row carries the full chain back to source:
-
-| Column | Set by | Answers |
-|---|---|---|
-| `batch_id` | Job parameter | Which batch delivered this row |
-| `source_file` | Spark `_metadata` at ingest | Which physical file it came from |
-| `ingestion_timestamp` | Bronze write | When it landed |
-| `created_timestamp` | Silver first write | When the row first appeared in silver |
-| `updated_timestamp` | Silver merge | When it was last changed |
-
-Combined with Delta time travel on every table, any figure in a report can be traced to the file that produced it and the run that loaded it, and the state of any table at any past point can be reconstructed.
-
----
-
-## 8. Notebook index
-
-| Path | Purpose |
-|---|---|
-| `00-common/01.environment-configuration` | Catalog, schema and path variables |
-| `00-common/02.bronze-helpers` | Ingestion metadata and bronze write |
-| `00-common/03.silver-helpers` | Cleaning functions and silver merge |
-| `01-bronze/` | One notebook per source table, landing to bronze |
-| `02-silver/` | One notebook per table, bronze to silver |
-| `03-gold/` | Dimensional model |
-| `04-orchestration/` | Control table and job task notebooks |
-
-
 
