@@ -4,24 +4,21 @@
 
 ---
 
-An end-to-end order-to-cash lakehouse on Databricks. Monthly batch files land, move through a medallion architecture, and end as a star schema for reporting — orchestrated, tracked and recoverable.
-
-![Pipeline workflow](docs/images/workflow.jpg)
-
+Order-to-cash pipeline on Databricks. Monthly files land in a volume, pass through bronze, silver and gold, and end as a star schema for reporting. It runs on a schedule and tracks its own progress.
 
 ---
 
-## 1. The company
+## 1. The business
 
-**Kestrel Global Trading Ltd** is a B2B distributor of branded consumer and industrial goods, headquartered in London and trading across five regions. The business sells to roughly 5,000 trade customers spread over 40 cities, moving around 1,200 SKUs from a portfolio of suppliers.
+Kestrel Global Trading is a London-based B2B distributor. Five thousand trade customers across 40 cities and five regions, moving 1,200 SKUs. It holds and ships stock but does not manufacture, and fulfilment runs through five contracted carriers.
 
-Kestrel does not manufacture and does not run its own fleet. It buys, holds and distributes, and everything ships through five contracted carriers. Customers buy through four channels: direct field sales, telesales, distributor partners, and since early 2026 a digital channel split between web ordering and EDI integration with the larger accounts.
+Three things about the business show up directly in the data:
 
-Because the customer base is genuinely international, Kestrel invoices in local currency. Five currencies sit in the ledger: US dollars, Singapore dollars, Brazilian real, euros and UAE dirhams. Group reporting is in sterling.
+Invoices are raised in five currencies. Group reporting is in sterling, so every value converts at the rate for its invoice month.
+The ERP was replaced in January 2025. Orders before that date use different column names and status codes, so two years of trading cannot be read without reconciling them.
+A digital sales channel launched in January 2026, adding a column the earlier extracts do not have.
 
-The business has grown quickly and not always tidily. A legacy ERP ran the order book until the end of 2024, when Kestrel migrated to a new platform. The migration went live in January 2025 and the digital channel was bolted on in January 2026. Each of those events left its mark on the data, and nobody was given the time to go back and reconcile what came before.
-
-Marketing runs SKU-level promotional campaigns. Finance sets monthly revenue targets by region. Warehouse teams take a monthly stock count. All of it lives in separate systems that have never spoken to each other.
+Order, invoice, payment and shipment data arrives as monthly file drops from systems that have never spoken to each other. Analysts rebuild the picture in a spreadsheet each month. It takes a week and breaks when someone is on leave.
 
 ---
 
