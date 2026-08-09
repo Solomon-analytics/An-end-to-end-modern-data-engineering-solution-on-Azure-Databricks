@@ -628,7 +628,7 @@ Resolves the many-to-many relationship between campaigns and products. A campaig
 
 ## Stack
 
-Databricks (Free Edition) · PySpark · Delta Lake · Unity Catalog · Databricks Workflows · Power BI
+Databricks (Free Edition) · PySpark · Delta Lake · Unity Catalog · Databricks Workflows
 
 ---
 
