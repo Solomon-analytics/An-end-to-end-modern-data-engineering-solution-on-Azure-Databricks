@@ -6,7 +6,7 @@ Order-to-cash pipeline on Databricks. Monthly files land in a volume, pass throu
 
 ---
 
-## 1. The business
+## The business
 
 Kestrel Global Trading is a London-based B2B distributor. Five thousand trade customers across 40 cities and five regions, moving 1,200 SKUs. It holds and ships stock but does not manufacture, and fulfilment runs through five contracted carriers.
 
@@ -20,7 +20,7 @@ Order, invoice, payment and shipment data arrives as monthly file drops from sys
 
 ---
 
-## 2. The business problem
+## The business problem
 
 Kestrel has plenty of data and no ability to use it. Specifically:
 
@@ -38,7 +38,7 @@ I have been engaged as a data engineer to design and build a platform that solve
 
 ---
 
-## 3. The data
+## The data
 
 ### Simulation note
 
@@ -99,9 +99,9 @@ Source systems export on a monthly cycle. Each export produces a dated batch, an
 
 ---
 
-## 4. The solution
+## The solution
 
-## 4.1. Requirements
+## Requirements
 
 ## What this project sets out to do
 
@@ -116,7 +116,7 @@ Source systems export on a monthly cycle. Each export produces a dated batch, an
 
 ---
 
-## 4.2. Environment setup
+## Environment setup
 
 ### Storage and governance
 
@@ -271,7 +271,7 @@ Star schema built for analysis.
 
 ---
 
-# 4 Orchestration
+# 4. Orchestration
 
 `docs/orchestration.md`
 
