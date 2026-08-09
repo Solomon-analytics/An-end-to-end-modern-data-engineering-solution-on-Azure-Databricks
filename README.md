@@ -4,6 +4,8 @@
 
 Order-to-cash pipeline on Databricks. Monthly files land in a volume, pass through bronze, silver and gold, and end as a star schema for reporting. It runs on a schedule and tracks its own progress.
 
+![Solution architecture](docs/images/solution-architecture.svg)
+
 ---
 
 ## The business
@@ -113,6 +115,7 @@ Source systems export on a monthly cycle. Each export produces a dated batch, an
 | 4 | **Automated orchestration** | Control table and Databricks Workflow |
 | 5 | **Data dictionary** | Every gold table, column and business rule documented |
 
+![Medallion architecture](docs/images/medallion-architecture-flow-chart.svg)
 
 ---
 
@@ -266,8 +269,9 @@ Star schema built for analysis.
 - 
 **Model:** 4 dimensions · 4 facts · 1 bridge
 
-📁 [`05_gold/`](05_gold)
+![Dimensional model](docs/images/dimensional-model.svg)
 
+📁 [`05-gold/`](05-gold)
 
 ---
 
@@ -277,7 +281,7 @@ Star schema built for analysis.
 
 The pipeline runs as one Databricks Workflow, `Kestrel_ETL_Pipeline`, on serverless compute. It finds its own work, processes a batch end to end, and records what it did.
 
-![Job workflow](images/workflow.svg)
+![Job workflow](docs/images/workflow.svg)
 
 ---
 
