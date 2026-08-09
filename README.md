@@ -275,7 +275,51 @@ Star schema built for analysis.
 
 ---
 
-# 4. Orchestration
+# 4. Data quality findings
+
+Four things were checked before any cleaning rule was written. In each case the obvious fix was the wrong one.
+
+---
+
+**Duplicates in the order lines were not duplicates.**
+
+Checking `order_id` plus `product_sku` returned 2,621 rows. Deduplicating on that pair would have deleted about 1,900 valid revenue lines.
+
+Two things were going on. Six hundred of the rows had a null SKU, and a duplicate check treats null as matching null, so two different products looked identical. The rest were split lines: unit price was the same in every group, but the discount rate differed in two thirds of them. Part of an order takes a volume discount, part does not, so order entry writes two lines for the same product.
+
+`order_line_id` is the only column that expresses the grain, so that is the merge key. The handful of groups that match on quantity and discount as well are flagged, not removed, because the table has no line number or delivery date to tell a deliberate split from a re-keying error.
+
+---
+
+**Fifteen thousand lines have no product code.**
+
+That is 1.5% of lines, carrying £37.9m of revenue. Dropping them would understate group revenue with nothing to show it had happened.
+
+Unit price identifies the product for 98.9% of them, since almost every SKU has a price unique to it. That was published as a finding rather than used as a fix. Deriving a business key from a measure breaks the moment a price changes, and it would paper over a defect the source system should correct.
+
+The lines are flagged and routed to an unknown product member in gold, so the revenue stays in the totals.
+
+---
+
+**A hundred customers appear twice.**
+
+Only two columns differ between the pairs: the created date, and payment terms in two thirds of cases. Everything else matches, so these are the same customer recorded twice.
+
+`Prepaid` shows up only in the earlier record and never the later one, which is a customer moving onto credit terms. The later record is therefore the current agreement and wins. The superseded row is flagged rather than deleted.
+
+Deduplication runs in silver, before the merge, because a Delta merge fails when two source rows match one target row.
+
+---
+
+**Revenue is overstated at source.**
+
+`line_total` is quantity times unit price. The discount rate is populated and never applied.
+
+Both values are carried into gold: `line_total` exactly as delivered, and `net_line_value` calculated properly alongside it. Reporting uses the second. Keeping both means the gap can be measured and raised with the source system.
+
+---
+
+# 5. Orchestration
 
 `docs/orchestration.md`
 
