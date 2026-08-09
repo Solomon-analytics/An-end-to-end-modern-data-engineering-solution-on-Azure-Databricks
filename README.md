@@ -8,17 +8,36 @@ Order-to-cash pipeline on Databricks. Monthly files land in a volume, pass throu
 
 ---
 
+## Repository
+
+```
+kestrel-data-engineering/
+├── 00-common/                              config and shared helper notebooks
+├── 01-environment-setup/                   catalog, schemas, landing volume
+├── 02-bronze-dimension/                    13 reference tables, full load
+├── 03-bronze-incremental-fact/             6 transactional tables, incremental
+├── 04-bronze-to-silver-transformation/     19 tables, cleaned and conformed
+├── 05-gold/                                4 dimensions, 4 facts, 1 bridge
+├── 06-orchestration/                       control table and job tasks
+├── jobs/                                   exported workflow definition
+└── docs/
+    └── images/
+```
+
+---
+
 ## The business
 
 Kestrel Global Trading is a London-based B2B distributor. Five thousand trade customers across 40 cities and five regions, moving 1,200 SKUs. It holds and ships stock but does not manufacture, and fulfilment runs through five contracted carriers.
 
 Three things about the business show up directly in the data:
 
-Invoices are raised in five currencies. Group reporting is in sterling, so every value converts at the rate for its invoice month.
-The ERP was replaced in January 2025. Orders before that date use different column names and status codes, so two years of trading cannot be read without reconciling them.
-A digital sales channel launched in January 2026, adding a column the earlier extracts do not have.
+- Invoices are raised in five currencies. Group reporting is in sterling, so every value converts at the rate for its invoice month.
+- The ERP was replaced in January 2025. Orders before that date use different column names and status codes, so two years of trading cannot be read without reconciling them.
+- A digital sales channel launched in January 2026, adding a column the earlier extracts do not have.
 
 Order, invoice, payment and shipment data arrives as monthly file drops from systems that have never spoken to each other. Analysts rebuild the picture in a spreadsheet each month. It takes a week and breaks when someone is on leave.
+
 
 ---
 
@@ -34,7 +53,7 @@ Order, invoice, payment and shipment data arrives as monthly file drops from sys
 
 **There is no history and no audit trail.** Reference files are overwritten each month. When a customer moves between regions, last year's regional numbers change retrospectively. There is no record of what the data looked like when a decision was made, which is now a problem for the annual audit.
 
-I have been engaged as a data engineer to design and build a platform that solves these problems: one governed, automated, auditable pipeline that takes the monthly file drops and produces a reporting model the business can trust.
+My job was to replace that spreadsheet with a pipeline that loads itself, records what it has done, and produces numbers anyone can trace back to a source file.
 
 ---
 
@@ -178,6 +197,7 @@ No `MANAGED LOCATION` clause is given on the catalog and no `LOCATION` on the vo
 
 Folder names mirror the schemas, so the shape of the pipeline is visible from the workspace tree without reading any code.
 
+📁 [`01-environment-setup/`](01-environment-setup)
 ---
 
 ## Shared components
@@ -276,11 +296,9 @@ Star schema built for analysis.
 
 ---
 
-# 4. Data quality findings
+## 4. Data quality
 
 Four things were checked before any cleaning rule was written. In each case the obvious fix was the wrong one.
-
----
 
 **Duplicates in the order lines were not duplicates.**
 
@@ -290,8 +308,6 @@ Two things were going on. Six hundred of the rows had a null SKU, and a duplicat
 
 `order_line_id` is the only column that expresses the grain, so that is the merge key. The handful of groups that match on quantity and discount as well are flagged, not removed, because the table has no line number or delivery date to tell a deliberate split from a re-keying error.
 
----
-
 **Fifteen thousand lines have no product code.**
 
 That is 1.5% of lines, carrying £37.9m of revenue. Dropping them would understate group revenue with nothing to show it had happened.
@@ -299,8 +315,6 @@ That is 1.5% of lines, carrying £37.9m of revenue. Dropping them would understa
 Unit price identifies the product for 98.9% of them, since almost every SKU has a price unique to it. That was published as a finding rather than used as a fix. Deriving a business key from a measure breaks the moment a price changes, and it would paper over a defect the source system should correct.
 
 The lines are flagged and routed to an unknown product member in gold, so the revenue stays in the totals.
-
----
 
 **A hundred customers appear twice.**
 
@@ -310,28 +324,22 @@ Only two columns differ between the pairs: the created date, and payment terms i
 
 Deduplication runs in silver, before the merge, because a Delta merge fails when two source rows match one target row.
 
----
-
 **Revenue is overstated at source.**
 
 `line_total` is quantity times unit price. The discount rate is populated and never applied.
 
 Both values are carried into gold: `line_total` exactly as delivered, and `net_line_value` calculated properly alongside it. Reporting uses the second. Keeping both means the gap can be measured and raised with the source system.
 
+
 ---
 
-# 5. Orchestration
-
-`docs/orchestration.md`
+## 5. Orchestration
 
 The pipeline runs as one Databricks Workflow, `Kestrel_ETL_Pipeline`, on serverless compute. It finds its own work, processes a batch end to end, and records what it did.
 
 ![Job workflow](docs/images/workflow.svg)
 
----
-
-## Requirements
-
+**Requirements**
 - Find the next unprocessed batch without being told which one
 - Process batches oldest first, so ingestion follows the order the source delivered
 - Finish successfully when there is nothing to do, rather than failing
@@ -341,9 +349,7 @@ The pipeline runs as one Databricks Workflow, `Kestrel_ETL_Pipeline`, on serverl
 - Never process the same batch twice
 - Keep the job to a readable number of tasks, without one task per source table
 
----
-
-## Control table
+### Control table
 
 `control.batch_control` is the pipeline's memory. Nothing is held between runs in code, because the table records what has already been handled.
 
@@ -359,23 +365,21 @@ Rows are appended rather than overwritten, so a batch that took several attempts
 
 📁 [`06-orchestration/`](06-orchestration)
 
----
-
-## Layer driver notebooks
+### Layer driver notebooks
 
 The pipeline has 47 table notebooks: 13 bronze reference, 6 bronze transactional, 19 silver and 9 gold. Wiring each as its own job task would give a workflow of over fifty tasks.
 
 That was rejected for three reasons. A DAG that wide cannot be read or screenshotted. Every task starts serverless compute separately, and on Free Edition that consumption adds up fast. And adding a source table would mean editing the job definition rather than a list.
 
-Instead, one **driver notebook per layer** was created that calls its table notebooks in order:
+Instead, one driver notebook per layer calls its table notebooks in order:
 
 | Driver | Calls | Job task |
 |---|---|---|
-| `01-bronze/00.run-bronze-dimensions` | 13 reference notebooks | `run_bronze_dimensions` |
-| `01-bronze/00.run-bronze-incremental-facts` | 6 transactional notebooks | `run_bronze_incremental_facts` |
-| `02-silver/00.run-all-silver` | 19 notebooks | `run_silver` |
-| `03-gold/00.run-gold-dimensions` | 4 dimension notebooks | `run_gold_dimensions` |
-| `03-gold/00.run-gold-facts` | 4 facts and the bridge | `run_gold_facts` |
+| `02-bronze-dimension/00.run-bronze-dimensions` | 13 reference notebooks | `run_bronze_dimensions` |
+| `03-bronze-incremental-fact/00.run-bronze-incremental-facts` | 6 transactional notebooks | `run_bronze_incremental_facts` |
+| `04-bronze-to-silver-transformation/00.run-all-silver` | 19 notebooks | `run_silver` |
+| `05-gold/00.run-gold-dimensions` | 4 dimension notebooks | `run_gold_dimensions` |
+| `05-gold/00.run-gold-facts` | 4 facts and the bridge | `run_gold_facts` |
 
 Each driver takes `p_batch_id` from the job, then chains its notebooks with `%run`. The batch identifier is read once at the top and every inlined notebook picks it up from the shared context.
 
@@ -390,19 +394,19 @@ v_batch_id = dbutils.widgets.get("p_batch_id")
 %run ./02.campaign_log
 ```
 
-**Order is the dependency.** `%run` blocks until the notebook finishes, so listing them in sequence is enough. This matters most in gold, where facts take their surrogate keys from the dimensions, which is why dimensions and facts are separate tasks rather than one.
+`%run` rather than `dbutils.notebook.run`, because Free Edition permits one concurrent run and a nested run fails immediately. `%run` executes inline in the same context, so no new run is created.
+
+**Order is the dependency.** `%run` blocks until the notebook finishes, so listing them in sequence is enough. This matters most in gold, where facts take their surrogate keys from the dimensions, which is why dimensions and facts are separate tasks.
 
 **Failures still propagate.** A notebook that raises stops the cell, fails the driver, fails the job task, and triggers `fail_batch`.
 
 Adding a source table means one line in a driver notebook. The job definition does not change.
 
-Over fifty tasks becomes nine.
+Over fifty tasks becomes ten.
 
----
+### Tasks
 
-## Tasks
-
-Nine tasks. Every task from `create_new_batch` down takes `p_batch_id` as a parameter, sourced from the first task.
+Ten tasks. Every task from `create_new_batch` down takes `p_batch_id` as a parameter, sourced from the first task.
 
 | Task | Type | Depends on | Parameter |
 |---|---|---|---|
@@ -415,7 +419,7 @@ Nine tasks. Every task from `create_new_batch` down takes `p_batch_id` as a para
 | `run_gold_dimensions` | Notebook | `run_silver` | `p_batch_id` |
 | `run_gold_facts` | Notebook | `run_gold_dimensions` | `p_batch_id` |
 | `complete_batch` | Notebook | `run_gold_facts` | `p_batch_id` |
-| `fail_batch` | Notebook | all four processing tasks | `p_batch_id` |
+| `fail_batch` | Notebook | all five processing tasks | `p_batch_id` |
 
 **Condition expression**
 
@@ -431,9 +435,7 @@ p_batch_id = {{tasks.identify_next_batch.values.p_batch_id}}
 
 `fail_batch` uses **Run if dependencies: at least one failed**, so it fires only when something upstream breaks.
 
----
-
-## What each run does
+### What each run does
 
 `identify_next_batch` lists the landing volume, keeps only directories, and compares them against batches the control table already holds at `in-progress` or `completed`. The earliest untracked batch wins. Two task values are published: `p_batch_id` with the batch, and `has_batch` as a flag.
 
@@ -441,15 +443,13 @@ p_batch_id = {{tasks.identify_next_batch.values.p_batch_id}}
 
 `create_new_batch` writes the batch to the control table at `in-progress`, claiming it.
 
-The four processing tasks run in sequence: bronze dimensions, bronze facts, silver, gold dimensions, gold facts. Order matters in gold, since facts take their surrogate keys from the dimensions.
+The five processing tasks run in sequence: bronze dimensions, bronze facts, silver, gold dimensions, gold facts. Order matters in gold, since facts take their surrogate keys from the dimensions.
 
 `complete_batch` merges the batch to `completed` using a condition requiring the current status to be `in-progress`. A batch can therefore only be completed if it was properly started, and re-running the task cannot alter a finished row.
 
 `fail_batch` marks the batch `failed` with an error message. Because `identify_next_batch` treats only `in-progress` and `completed` as tracked, a failed batch becomes eligible again on the next run with no manual intervention.
 
----
-
-## Two details:
+### Worth knowing
 
 **`has_batch` is a string, not a boolean.** The condition task compares values as text, so a Python boolean would serialise as `False` with a capital F and the comparison would never match.
 
@@ -457,21 +457,15 @@ The four processing tasks run in sequence: bronze dimensions, bronze facts, silv
 
 ---
 
----
-
-# 6. Data Dictionary
-
-`docs/data-dictionary.md`
+## 6. Data dictionary
 
 Reference for the gold layer, which is what reporting queries. Silver and bronze are listed at the end.
 
-Every gold table carries `created_timestamp` (when the row first entered gold) and `updated_timestamp` (when it was last rebuilt). These are omitted from the tables below to save repetition.
+Every gold table carries `created_timestamp` (when the row first entered gold) and `updated_timestamp` (when it was last rebuilt). These are omitted below to save repetition.
 
----
+### Dimensions
 
-## Dimensions
-
-### dim_customer
+#### dim_customer
 
 One row per customer. Ship-to address attached.
 
@@ -490,7 +484,7 @@ One row per customer. Ship-to address attached.
 | `customer_region_id` | string | Foreign key to the region reference |
 | `customer_region_name` | string | Region: EU, US, APAC, LATAM or ME |
 
-### dim_customer_account
+#### dim_customer_account
 
 One row per customer account. Commercial terms and bill-to address. Deduplicated to the latest created date.
 
@@ -504,7 +498,7 @@ One row per customer account. Commercial terms and bill-to address. Deduplicated
 | `account_manager` | string | Owning account manager |
 | `account_active_flag` | string | Y or N |
 | `customer_account_created_date` | date | When the account was opened |
-| `customer_account_created_date_id` | int | Date key, `yyyyMMdd` |
+| `customer_account_created_date_id` | string | Date key, `yyyyMMdd` |
 | `account_bill_to_postal_code` | string | Bill-to postcode |
 | `account_bill_to_address_type` | string | Address role, always BILL_TO |
 | `account_city_id` | string | Foreign key to the city reference |
@@ -512,7 +506,7 @@ One row per customer account. Commercial terms and bill-to address. Deduplicated
 | `account_region_id` | string | Foreign key to the region reference |
 | `account_region_name` | string | Region |
 
-### dim_product
+#### dim_product
 
 One row per SKU, with its category hierarchy.
 
@@ -528,7 +522,7 @@ One row per SKU, with its category hierarchy.
 | `product_sub_category_name` | string | Subcategory, 18 values |
 | `product_category_name` | string | Category: Apparel, Beauty, Electronics, Home, Sports or Industrial |
 
-### dim_campaign
+#### dim_campaign
 
 One row per marketing campaign. Attributes arrive repeated on the daily campaign log and are aggregated to campaign grain here.
 
@@ -541,15 +535,13 @@ One row per marketing campaign. Attributes arrive repeated on the daily campaign
 | `total_campaign_budget` | decimal | Approved budget for the campaign |
 | `campaign_start_date` | date | First day of the campaign |
 | `campaign_end_date` | date | Last day of the campaign |
-| `campaign_start_date_id` | int | Date key, `yyyyMMdd` |
-| `campaign_end_date_id` | int | Date key, `yyyyMMdd` |
+| `campaign_start_date_id` | string | Date key, `yyyyMMdd` |
+| `campaign_end_date_id` | string | Date key, `yyyyMMdd` |
 | `campaign_duration_days` | int | Length in days, inclusive of both endpoints |
 
----
+### Facts
 
-## Facts
-
-### fact_sales_order
+#### fact_sales_order
 
 One row per order. Invoice and payment status carried down from the order's invoice.
 
@@ -567,13 +559,14 @@ One row per order. Invoice and payment status carried down from the order's invo
 | `order_date` | date | Date the order was raised |
 | `invoice_date` | date | Date the order was invoiced. Null if not yet invoiced |
 | `payment_date` | date | Date of first payment. Null if unpaid |
-| `order_date_id` | int | Date key, `yyyyMMdd` |
-| `invoice_date_id` | int | Date key, `yyyyMMdd` |
-| `payment_date_id` | int | Date key, `yyyyMMdd` |
+| `order_date_id` | string | Date key, `yyyyMMdd` |
+| `invoice_date_id` | string | Date key, `yyyyMMdd` |
+| `payment_date_id` | string | Date key, `yyyyMMdd` |
 | `order_total_gbp` | decimal | Invoice total converted to sterling at the rate for its invoice month |
 
+**Notes.** Around 12% of orders have no invoice and roughly 22% of invoices are never paid, so null invoice and payment dates are a valid business state rather than missing data. Payments are aggregated to invoice grain before joining, so an invoice settled in instalments does not duplicate the order.
 
-### fact_sales_order_lines
+#### fact_sales_order_lines
 
 One row per order line. The transactional grain of the model.
 
@@ -584,8 +577,8 @@ One row per order line. The transactional grain of the model.
 | `sales_order_number` | string | Source order number, degenerate dimension |
 | `product_sk` | bigint | Foreign key to `dim_product`. Unknown member where the SKU is missing |
 | `product_number` | string | Source SKU. Null on around 1.5% of lines |
-| `customer_sk` | bigint | Inherited from the sales_order |
-| `bill_to_account_sk` | bigint | Inherited from the sales_order |
+| `customer_sk` | bigint | Inherited from the order |
+| `bill_to_account_sk` | bigint | Inherited from the order |
 | `line_quantity` | int | Units ordered |
 | `line_unit_price` | decimal | Price per unit before discount |
 | `line_discount_pct` | decimal | Discount rate: 0, 0.05, 0.10 or 0.15 |
@@ -593,11 +586,11 @@ One row per order line. The transactional grain of the model.
 | `net_line_value` | decimal | Calculated: quantity × unit price × (1 − discount). The correct revenue figure |
 | `order_line_status` | string | Order status, inherited from the order |
 | `order_date` | date | Inherited from the order |
-| `order_date_id` | int | Date key, `yyyyMMdd` |
+| `order_date_id` | string | Date key, `yyyyMMdd` |
 
-**Notes.** `line_total` is retained as delivered so the two can be compared. The source never applies the discount, which overstates revenue.
+**Notes.** `line_total` is retained as delivered so the two can be compared. `customer_sk` and `bill_to_account_sk` are inherited from the parent order for convenience when querying this table directly. Customer relationships are held on `fact_sales_order` only, so there is one filter path.
 
-### fact_shipment
+#### fact_shipment
 
 One row per shipment. A shipment is recorded against an order, not an order line.
 
@@ -607,14 +600,14 @@ One row per shipment. A shipment is recorded against an order, not an order line
 | `shipment_number` | string | Source shipment identifier |
 | `order_sk` | bigint | Foreign key to `fact_sales_order` |
 | `sales_order_number` | string | Source order number |
-| `customer_sk` | bigint | Foreign key to `dim_customer` |
+| `customer_sk` | bigint | Same value as the order's. Kept for direct querying; the relationship runs through `fact_sales_order` |
 | `shipping_carrier` | string | Maersk, DHL, UPS, DSV or Kuehne+Nagel |
 | `order_date` | date | Inherited from the order |
 | `ship_date` | date | Date the consignment left the warehouse |
 | `delivery_date` | date | Date delivered. Null while in transit, around 20% of rows |
-| `order_date_id` | int | Date key, `yyyyMMdd` |
-| `ship_date_id` | int | Date key, `yyyyMMdd` |
-| `delivery_date_id` | int | Date key, `yyyyMMdd` |
+| `order_date_id` | string | Date key, `yyyyMMdd` |
+| `ship_date_id` | string | Date key, `yyyyMMdd` |
+| `delivery_date_id` | string | Date key, `yyyyMMdd` |
 | `order_to_ship_days` | int | Days from order to despatch |
 | `transit_days` | int | Days from despatch to delivery. Null while in transit |
 | `order_to_delivery_days` | int | Total cycle time. Null while in transit |
@@ -625,8 +618,9 @@ One row per shipment. A shipment is recorded against an order, not an order line
 | `is_split_shipment` | boolean | True where the order shipped in more than one consignment |
 | `batch_id` | string | Batch that delivered the row |
 
+**Notes.** A consignment cannot be attributed to a specific order line, so this fact relates to `fact_sales_order` and never to `fact_sales_order_lines`. Null transit days are correct and should not be set to zero, or average transit time drops without explanation.
 
-### fact_campaign
+#### fact_campaign
 
 One row per campaign per day.
 
@@ -634,24 +628,63 @@ One row per campaign per day.
 |---|---|---|
 | `campaign_sk` | bigint | Foreign key to `dim_campaign` |
 | `campaign_log_date` | date | The day being reported |
-| `campaign_log_date_id` | int | Date key, `yyyyMMdd` |
+| `campaign_log_date_id` | string | Date key, `yyyyMMdd` |
 | `campaign_impressions` | bigint | Impressions served |
 | `campaign_clicks` | bigint | Clicks recorded |
 | `campaign_spend` | decimal | Spend for the day |
 
----
+**Notes.** Ratios such as click-through rate and cost per click are not stored, because they do not aggregate. Derive them in the reporting layer from the components.
 
-## Bridge
+### Bridge
 
-### bridge_campaign_product
+#### bridge_campaign_product
 
-Resolves the many-to-many relationship between campaigns and products. A campaign covers several product SKUs and a SKU appears in several campaigns.
+Resolves the many-to-many relationship between campaigns and products. A campaign covers several SKUs and a SKU appears in several campaigns.
 
 | Column | Type | Description |
 |---|---|---|
 | `campaign_sk` | bigint | Foreign key to `dim_campaign` |
 | `product_sk` | bigint | Foreign key to `dim_product` |
 
+**Notes.** Identifies which SKUs a campaign covered. It does not attribute revenue to a campaign, since no order line records the campaign that prompted it.
+
+### Silver layer
+
+Cleaned and conformed, one table per source. Every table carries `batch_id`, `source_file`, `ingestion_timestamp`, `created_timestamp` and `updated_timestamp`.
+
+| Table | Grain | Merged on |
+|---|---|---|
+| `sales_order` | Order | `order_number` |
+| `sales_order_lines` | Order line | `order_line_id` |
+| `invoice` | Invoice | `invoice_number` |
+| `invoice_lines` | Invoice line | `invoice_number` + `line_number` |
+| `payment` | Payment | `payment_id` |
+| `shipment` | Shipment | `shipment_id` |
+| `cust_master` | Customer | `customer_id` |
+| `address` | Customer and address type | `customer_id` + `address_type` |
+| `customer_contacts` | Customer | `customer_id` |
+| `products` | SKU | `product_id` |
+| `subcategories` | Subcategory | `sub_category_id` |
+| `cities` | City | `city_id` |
+| `regions` | Region | `region_id` |
+| `channels` | Channel | `channel_code` |
+| `campaign_log` | Campaign and day | `campaign_id` + `log_date` |
+| `campaign_sku` | Campaign and SKU | `campaign_id` + `sku` |
+| `exchange_rates` | Currency and month | `currency` + `rate_month` |
+| `sales_targets` | Region and month | `region_id` + `target_month` |
+| `user_details` | User | `user_id` |
+
+### Bronze layer
+
+Source data as delivered, with provenance attached. Column names and types match the source. Every table adds:
+
+| Column | Type | Description |
+|---|---|---|
+| `batch_id` | string | Batch folder the row came from |
+| `source_file` | string | Full path of the physical file |
+| `ingestion_timestamp` | timestamp | When the row was loaded |
+
+Tables are partitioned by `batch_id` and written with `replaceWhere`, so reprocessing a batch replaces it rather than appending.
 
 ---
 
@@ -661,28 +694,30 @@ Resolves the many-to-many relationship between campaigns and products. A campaig
 |---|---|
 | `replaceWhere` on the batch partition | Reprocessing replaces rather than duplicates |
 | Merge on the business key, not append | Handles corrections and lifecycle updates from later batches |
-| Batch guard on the silver merge | Feeds run on different event clocks — an order can be invoiced and paid months later |
+| Batch guard on the silver merge | Feeds run on different event clocks, so an order can be invoiced and paid months later |
 | Flag quality issues, never drop | Consumers see what is wrong instead of rows quietly disappearing |
 | Hashed surrogate keys | Deterministic, so a full rebuild orphans nothing |
 | Pre-aggregate before joining | A fact can only join to things at or above its own grain |
 | Shipment kept as its own fact | Split orders often use two carriers, so carrier cannot collapse to order grain |
+| Check duplicates before removing them | Most flagged duplicates in the order lines were valid split lines |
+| Never derive a business key from a measure | Price identifies the product for 98.9% of missing SKUs, but using it would break when prices change |
 
 ---
-## Result
 
-Lakeflow Jobs history
-![job-run-history](docs/images/job-run-history.png)
+## Results
 
-Contol table: ingestion history:
-![batch-ingestion](docs/images/batch-ingestion.png)
-![batch-ingestion-2](docs/images/batch-ingestion-2.png)
+**Job run history**
 
-dim and fact tables: ingestion history:
-![dim-fact-total-ingestion-count](docs/images/dim-fact-total-ingestion-count.png)
+![Job run history](docs/images/job-run-history.png)
 
+**Control table, batch ingestion history**
 
+![Batch ingestion](docs/images/batch-ingestion.png)
+![Batch ingestion 2](docs/images/batch-ingestion-2.png)
 
+**Row counts across the dimension and fact tables**
 
+![Dimension and fact row counts](docs/images/dim-fact-total-ingestion-count.png)
 
 ---
 
@@ -694,9 +729,11 @@ Databricks (Free Edition) · PySpark · Delta Lake · Unity Catalog · Databrick
 
 ## Notes and limitations
 
-- Landing is a Unity Catalog managed volume. In production this would be an ADLS Gen2 external location with a managed identity credential — the pipeline code is unchanged either way.
-- Layer notebooks are chained with `%run` inside a driver notebook. Free Edition permits one concurrent run, so nested job runs are not available; on a paid workspace each notebook would be its own job task.
+- Landing is a Unity Catalog managed volume. In production this would be an ADLS Gen2 external location with a managed identity credential. The pipeline code is unchanged either way, since both resolve to a governed path.
+- Layer notebooks are chained with `%run` inside a driver notebook. Free Edition permits one concurrent run, so nested job runs are not available. On a paid workspace each notebook would be its own job task, giving per-table visibility in the job DAG.
 - One batch processes per run. A backlog clears over successive runs.
+- A cancelled run leaves its batch at `in-progress`, which the discovery step reads as tracked. A stale reset in `identify_next_batch`, flipping any `in-progress` row older than a few hours to `failed`, would close this.
+- There is no date dimension. Date keys are held on the facts for a future calendar but are not currently joined.
 
 
 ---
