@@ -271,26 +271,140 @@ Star schema built for analysis.
 
 ---
 
-## 4. Orchestration
+# 4 Orchestration
 
-Scheduled, unattended, recoverable.
+`docs/orchestration.md`
 
-**Requirements**
-- Discover the next unprocessed batch automatically, oldest first
-- Exit cleanly when there is nothing to do
-- One batch identifier resolved once and passed to every task
-- Failed batches become eligible again rather than blocking the pipeline
+The pipeline runs as one Databricks Workflow, `Kestrel_ETL_Pipeline`, on serverless compute. It finds its own work, processes a batch end to end, and records what it did.
 
-**Steps**
-- `control.batch_control` tracks every batch and its status
-- Batch discovery compares the landing volume against tracked batches
-- Task values pass `p_batch_id` and a `has_batch` flag downstream
-- Condition task routes the run, or ends it green when no batch is waiting
-- Batch marked `in-progress` on claim, merged to `completed` on success
-- Failure task runs on any upstream failure and marks the batch `failed`, so it retries next run
+![Job workflow](images/workflow.svg)
 
-📁 [`06-orchestration/`](06-orchestration)
+---
 
+## Requirements
+
+- Find the next unprocessed batch without being told which one
+- Process batches oldest first, so ingestion follows the order the source delivered
+- Finish successfully when there is nothing to do, rather than failing
+- Resolve the batch identifier once and pass it to every task
+- Keep batch state visible and queryable at all times
+- Return a failed batch to the queue instead of letting it block the pipeline
+- Never process the same batch twice
+- Keep the job to a readable number of tasks, without one task per source table
+
+---
+
+## Control table
+
+`control.batch_control` is the pipeline's memory. Nothing is held between runs in code, because the table records what has already been handled.
+
+| Column | Purpose |
+|---|---|
+| `batch_id` | The batch folder being processed |
+| `status` | `in-progress`, `completed` or `failed` |
+| `created_timestamp` | When the batch was claimed |
+| `updated_timestamp` | When its status last changed |
+| `error_message` | Populated when a run fails |
+
+Rows are appended rather than overwritten, so a batch that took several attempts keeps its full history.
+
+---
+
+## Layer driver notebooks
+
+The pipeline has 47 table notebooks: 13 bronze reference, 6 bronze transactional, 19 silver and 9 gold. Wiring each as its own job task would give a workflow of over fifty tasks.
+
+That was rejected for three reasons. A DAG that wide cannot be read or screenshotted. Every task starts serverless compute separately, and on Free Edition that consumption adds up fast. And adding a source table would mean editing the job definition rather than a list.
+
+Instead, one **driver notebook per layer** was created that calls its table notebooks in order:
+
+| Driver | Calls | Job task |
+|---|---|---|
+| `01-bronze/00.run-bronze-dimensions` | 13 reference notebooks | `run_bronze_dimensions` |
+| `01-bronze/00.run-bronze-incremental-facts` | 6 transactional notebooks | `run_bronze_incremental_facts` |
+| `02-silver/00.run-all-silver` | 19 notebooks | `run_silver` |
+| `03-gold/00.run-gold-dimensions` | 4 dimension notebooks | `run_gold_dimensions` |
+| `03-gold/00.run-gold-facts` | 4 facts and the bridge | `run_gold_facts` |
+
+Each driver takes `p_batch_id` from the job, then chains its notebooks with `%run`. The batch identifier is read once at the top and every inlined notebook picks it up from the shared context.
+
+```python
+dbutils.widgets.text("p_batch_id", "")
+v_batch_id = dbutils.widgets.get("p_batch_id")
+```
+```
+%run ./01.address
+```
+```
+%run ./02.campaign_log
+```
+
+**Order is the dependency.** `%run` blocks until the notebook finishes, so listing them in sequence is enough. This matters most in gold, where facts take their surrogate keys from the dimensions, which is why dimensions and facts are separate tasks rather than one.
+
+**Failures still propagate.** A notebook that raises stops the cell, fails the driver, fails the job task, and triggers `fail_batch`.
+
+Adding a source table means one line in a driver notebook. The job definition does not change.
+
+Over fifty tasks becomes nine.
+
+---
+
+## Tasks
+
+Nine tasks. Every task from `create_new_batch` down takes `p_batch_id` as a parameter, sourced from the first task.
+
+| Task | Type | Depends on | Parameter |
+|---|---|---|---|
+| `identify_next_batch` | Notebook | — | none |
+| `check_has_batch` | If/else condition | `identify_next_batch` | — |
+| `create_new_batch` | Notebook | `check_has_batch` (true) | `p_batch_id` |
+| `run_bronze_dimensions` | Notebook | `create_new_batch` | `p_batch_id` |
+| `run_bronze_incremental_facts` | Notebook | `run_bronze_dimensions` | `p_batch_id` |
+| `run_silver` | Notebook | `run_bronze_incremental_facts` | `p_batch_id` |
+| `run_gold_dimensions` | Notebook | `run_silver` | `p_batch_id` |
+| `run_gold_facts` | Notebook | `run_gold_dimensions` | `p_batch_id` |
+| `complete_batch` | Notebook | `run_gold_facts` | `p_batch_id` |
+| `fail_batch` | Notebook | all four processing tasks | `p_batch_id` |
+
+**Condition expression**
+
+```
+{{tasks.identify_next_batch.values.has_batch}} == true
+```
+
+**Parameter passed to every downstream task**
+
+```
+p_batch_id = {{tasks.identify_next_batch.values.p_batch_id}}
+```
+
+`fail_batch` uses **Run if dependencies: at least one failed**, so it fires only when something upstream breaks.
+
+---
+
+## What each run does
+
+`identify_next_batch` lists the landing volume, keeps only directories, and compares them against batches the control table already holds at `in-progress` or `completed`. The earliest untracked batch wins. Two task values are published: `p_batch_id` with the batch, and `has_batch` as a flag.
+
+`check_has_batch` routes on that flag. With nothing new, the run ends green rather than failing, which matters for a scheduled job that fires whether or not files have arrived.
+
+`create_new_batch` writes the batch to the control table at `in-progress`, claiming it.
+
+The four processing tasks run in sequence: bronze dimensions, bronze facts, silver, gold dimensions, gold facts. Order matters in gold, since facts take their surrogate keys from the dimensions.
+
+`complete_batch` merges the batch to `completed` using a condition requiring the current status to be `in-progress`. A batch can therefore only be completed if it was properly started, and re-running the task cannot alter a finished row.
+
+`fail_batch` marks the batch `failed` with an error message. Because `identify_next_batch` treats only `in-progress` and `completed` as tracked, a failed batch becomes eligible again on the next run with no manual intervention.
+
+---
+
+## Two details:
+
+**`has_batch` is a string, not a boolean.** The condition task compares values as text, so a Python boolean would serialise as `False` with a capital F and the comparison would never match.
+
+**Gold dimensions and facts are separate tasks.** Everything else could be one driver per layer, but facts take their surrogate keys from the dimensions. Splitting them puts that dependency in the job DAG rather than hiding it inside a notebook.
+
+---
 
 ---
 
