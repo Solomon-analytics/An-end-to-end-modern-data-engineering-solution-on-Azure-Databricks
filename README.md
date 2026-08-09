@@ -314,6 +314,8 @@ The pipeline runs as one Databricks Workflow, `Kestrel_ETL_Pipeline`, on serverl
 
 Rows are appended rather than overwritten, so a batch that took several attempts keeps its full history.
 
+📁 [`06-orchestration/`](06-orchestration)
+
 ---
 
 ## Layer driver notebooks
