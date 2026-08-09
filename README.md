@@ -221,6 +221,7 @@ Raw ingest with provenance attached. No cleaning, no business logic.
 - `write_to_bronze()` writes Delta partitioned by `batch_id`, using `replaceWhere` for idempotency
 
 📁 [`02-bronze-dimension/`](02-bronze-dimension) — 13 reference tables, full load
+
 📁 [`03-bronze-incremental-fact/`](03-bronze-incremental-fact) — 6 transactional tables, incremental load
 
 ---
@@ -244,7 +245,7 @@ Cleaned, conformed and merged on the business key.
 - Deduplicate deterministically on the declared business key
 - `write_to_silver()` merges on the business key, guarded so an older batch cannot overwrite newer data
 
-📁 [`04-bronze-to-silver-transformation`](04-bronze-to-silver_transformation) — 19 tables
+📁 [`04-bronze-to-silver-transformation/`](04-bronze-to-silver_transformation) — 19 tables
 
 ---
 
