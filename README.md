@@ -113,6 +113,7 @@ Source systems export on a monthly cycle. Each export produces a dated batch, an
 | 2 | **Data transformation** | Bronze → Silver, cleaned and conformed |
 | 3 | **Reporting and analytics** | Silver → Gold, dimensional model |
 | 4 | **Automated orchestration** | Control table and Databricks Workflow |
+| 5 | **Data dictionary** | 
 
 
 ---
@@ -212,7 +213,7 @@ Raw ingest with provenance attached. No cleaning, no business logic.
 - Reprocessing a batch must replace it, never duplicate it
 
 **Steps**
-- `p_batch_id` widget on every notebook — one code path for backfill and incremental
+- `p_batch_id` widget on every notebook - one code path for backfill and incremental
 - Shared configuration and helper functions pulled in with `%run`
 - Declared `StructType` per CSV source with `FAILFAST`; Parquet read on its own schema
 - `add_ingestion_metadata()` stamps ingestion timestamp and source file path
