@@ -99,7 +99,7 @@ Source systems export on a monthly cycle. Each export produces a dated batch, an
 
 ---
 
-## The solution
+## The solution:
 
 ## Requirements
 
@@ -110,8 +110,9 @@ Source systems export on a monthly cycle. Each export produces a dated batch, an
 | 1 | **Data ingestion** | Landing → Bronze, parameterised by batch |
 | 2 | **Data transformation** | Bronze → Silver, cleaned and conformed |
 | 3 | **Reporting and analytics** | Silver → Gold, dimensional model |
-| 4 | **Automated orchestration** | Control table and Databricks Workflow |
-| 5 | **Data dictionary** | Every gold table, column and business rule documented |
+| 4 | **Data quality findings** | Silver → Gold, dimensional model |
+| 5 | **Automated orchestration** | Control table and Databricks Workflow |
+| 6 | **Data dictionary** | Every gold table, column and business rule documented |
 
 ![Medallion architecture](docs/images/medallion-architecture-flow-chart.svg)
 
@@ -458,7 +459,7 @@ The four processing tasks run in sequence: bronze dimensions, bronze facts, silv
 
 ---
 
-# 5. Data Dictionary
+# 6. Data Dictionary
 
 `docs/data-dictionary.md`
 
