@@ -113,7 +113,7 @@ Source systems export on a monthly cycle. Each export produces a dated batch, an
 | 2 | **Data transformation** | Bronze → Silver, cleaned and conformed |
 | 3 | **Reporting and analytics** | Silver → Gold, dimensional model |
 | 4 | **Automated orchestration** | Control table and Databricks Workflow |
-| 5 | **Data dictionary** | 
+| 5 | **Data dictionary** | Every gold table, column and business rule documented |
 
 
 ---
