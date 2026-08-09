@@ -541,8 +541,8 @@ One row per order line. The transactional grain of the model.
 | `sales_order_number` | string | Source order number, degenerate dimension |
 | `product_sk` | bigint | Foreign key to `dim_product`. Unknown member where the SKU is missing |
 | `product_number` | string | Source SKU. Null on around 1.5% of lines |
-| `customer_sk` | bigint | Inherited from the order |
-| `bill_to_account_sk` | bigint | Inherited from the order |
+| `customer_sk` | bigint | Inherited from the sales_order |
+| `bill_to_account_sk` | bigint | Inherited from the sales_order |
 | `line_quantity` | int | Units ordered |
 | `line_unit_price` | decimal | Price per unit before discount |
 | `line_discount_pct` | decimal | Discount rate: 0, 0.05, 0.10 or 0.15 |
@@ -556,15 +556,15 @@ One row per order line. The transactional grain of the model.
 
 ### fact_shipment
 
-One row per shipment. Kept separate from the order because 15% of orders ship in two consignments, and most of those use two carriers.
+One row per shipment. A shipment is recorded against an order, not an order line.
 
 | Column | Type | Description |
 |---|---|---|
 | `shipment_sk` | bigint | Surrogate key. Hash of `shipment_number` |
 | `shipment_number` | string | Source shipment identifier |
 | `order_sk` | bigint | Foreign key to `fact_sales_order` |
-| `sales_order_number` | string | Source order number, degenerate dimension |
-| `ship_to_customer_sk` | bigint | Foreign key to `dim_customer` |
+| `sales_order_number` | string | Source order number |
+| `customer_sk` | bigint | Foreign key to `dim_customer` |
 | `shipping_carrier` | string | Maersk, DHL, UPS, DSV or Kuehne+Nagel |
 | `order_date` | date | Inherited from the order |
 | `ship_date` | date | Date the consignment left the warehouse |
