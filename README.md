@@ -244,7 +244,7 @@ Cleaned, conformed and merged on the business key.
 - Deduplicate deterministically on the declared business key
 - `write_to_silver()` merges on the business key, guarded so an older batch cannot overwrite newer data
 
-📁 [`04-bronze_to_silver_transformation/`](04-bronze_to_silver_transformation) — 19 tables
+📁 [`04-bronze-to-silver-transformation`](04-bronze-to-silver_transformation) — 19 tables
 
 ---
 
