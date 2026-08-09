@@ -667,6 +667,23 @@ Resolves the many-to-many relationship between campaigns and products. A campaig
 | Shipment kept as its own fact | Split orders often use two carriers, so carrier cannot collapse to order grain |
 
 ---
+## Result
+
+Lakeflow Jobs history
+![job-run-history](docs/images/job-run-history.png)
+
+Contol table: ingestion history:
+![batch-ingestion](docs/images/batch-ingestion.png)
+![batch-ingestion-2](docs/images/batch-ingestion-2.png)
+
+dim and fact tables: ingestion history:
+![dim-fact-total-ingestion-count](docs/images/dim-fact-total-ingestion-count.png)
+
+
+
+
+
+---
 
 ## Stack
 
