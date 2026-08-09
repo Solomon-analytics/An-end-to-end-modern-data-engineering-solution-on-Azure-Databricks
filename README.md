@@ -1,6 +1,4 @@
-# Project Cascade
-
-**An end-to-end order-to-cash lakehouse on Azure Databricks**
+## An end-to-end order-to-cash lakehouse on Azure Databricks
 
 ---
 
