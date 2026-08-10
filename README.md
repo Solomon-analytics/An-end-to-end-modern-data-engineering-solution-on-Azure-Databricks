@@ -288,7 +288,7 @@ Star schema built for analysis.
 - Add derived columns: net line value, GBP conversion, cycle times, date keys, status flags
 - Validate output, then `write_to_gold()` merges on the surrogate key
 - 
-**Model:** 4 dimensions · 4 facts · 1 bridge
+**Model:** 5 dimensions · 4 facts · 1 bridge
 
 ![Dimensional model](docs/images/dimensional-model.svg)
 
@@ -538,6 +538,35 @@ One row per marketing campaign. Attributes arrive repeated on the daily campaign
 | `campaign_start_date_id` | string | Date key, `yyyyMMdd` |
 | `campaign_end_date_id` | string | Date key, `yyyyMMdd` |
 | `campaign_duration_days` | int | Length in days, inclusive of both endpoints |
+
+#### dim_date
+
+One row per calendar day, January 2024 to December 2027, plus one unknown member.
+
+| Column | Type | Description |
+|---|---|---|
+| `date_id` | string | Key, `yyyyMMdd`. `-1` for the unknown member |
+| `full_date` | date | The date itself |
+| `day_of_month` | int | 1 to 31 |
+| `day_name` | string | Monday to Sunday |
+| `day_short_name` | string | Mon to Sun |
+| `day_of_week` | int | 1 to 7, Monday first |
+| `is_weekend` | boolean | True for Saturday and Sunday |
+| `week_of_year` | int | ISO week number |
+| `month_number` | int | 1 to 12 |
+| `month_name` | string | January to December |
+| `month_short_name` | string | Jan to Dec |
+| `month_year` | string | `2025-01`, sorts correctly as text |
+| `month_id` | string | Month key, `yyyyMM`, for monthly facts |
+| `month_start_date` | date | First day of the month |
+| `month_end_date` | date | Last day of the month |
+| `quarter_number` | int | 1 to 4 |
+| `quarter_name` | string | Q1 to Q4 |
+| `quarter_year` | string | `2025-Q1` |
+| `calendar_year` | int | Calendar year |
+| `fiscal_year` | int | Year the fiscal year starts in. April 2025 to March 2026 is FY2025 |
+| `fiscal_month_number` | int | 1 to 12, April first |
+| `fiscal_quarter_number` | int | 1 to 4, fiscal |
 
 ### Facts
 
