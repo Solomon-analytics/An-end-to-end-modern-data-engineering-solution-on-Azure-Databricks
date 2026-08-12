@@ -296,6 +296,49 @@ Star schema built for analysis.
 
 ---
 
+### Slowly changing dimensions
+
+Reporting is judged on year-on-year comparison, which only holds if the attributes used to slice the data reflect what was true at the time of the transaction.
+
+A customer sits in the EU region for the whole of 2025 and books revenue there. In 2026 the account moves to the Middle East. Overwrite the record and every historical order they placed reports under the new region. EU's 2025 revenue drops, MEA's rises, and nobody changed a transaction. That is the retrospective-change problem set out in the business case.
+
+`silver.cust_master` is therefore Type 2. Each record carries `valid_from`, `valid_to`, `is_current` and a `row_hash` of the tracked columns.
+
+**Tracked columns**, whose change opens a new version: segment, city, credit limit, payment terms and active flag. A column is tracked if changing it would alter a historical report.
+
+**Untracked columns** overwrite in place: name, account manager, created date. Nobody reports revenue by who owned the account two years ago, and a typo correction should not split a customer's history in two.
+
+**Change detection** compares a single SHA-256 hash of the tracked columns rather than every column individually. Adding a tracked column means editing one list.
+
+**The merge part.** A Delta `MERGE` allows one action per matched row, but a Type 2 change needs two: close the old version and insert the new one. Each changed record is therefore staged twice, once with a null merge key so it finds no match and falls through to the insert, once with the real key so it matches and closes the old row. One merge, both outcomes, one transaction.
+
+**In gold**, `dim_customer` holds every version and its surrogate key hashes `customer_id` plus `valid_from`, so each version has its own key. Facts join point-in-time:
+
+```python
+.join(dim_customer_df.alias("dc"),
+      (F.col("so.customer_id") == F.col("dc.customer_id"))
+      & (F.col("so.order_date") >= F.col("dc.valid_from"))
+      & (F.col("so.order_date") <
+         F.coalesce(F.col("dc.valid_to"), F.lit("2999-12-31").cast("date"))),
+      "left")
+
+```
+
+Exactly one version can satisfy all three conditions, so the join returns one row per order.
+
+`dim_customer_account` stays Type 1, filtered to the current version. It holds credit limit, terms and account manager, which are "where the account stands now" attributes. Making both dimensions Type 2 would mean two point-in-time joins on every fact for no analytical gain. Term history remains in silver if it is ever needed.
+
+**What it demonstrates.** Regional revenue for 2025 is identical before and after the batch in which 30 customers change region. Without versioning it would move.
+
+## Slowly changing dimensions: proof
+
+![SCD type 2](docs/images/scd-type-2.png)
+![SCD type 2](docs/images/scd-type-2-1.png)
+
+
+---
+
+
 ## 4. Data quality
 
 Four things were checked before any cleaning rule was written. In each case the obvious fix was the wrong one.
@@ -329,6 +372,43 @@ Deduplication runs in silver, before the merge, because a Delta merge fails when
 `line_total` is quantity times unit price. The discount rate is populated and never applied.
 
 Both values are carried into gold: `line_total` exactly as delivered, and `net_line_value` calculated properly alongside it. Reporting uses the second. Keeping both means the gap can be measured and raised with the source system.
+
+
+---
+
+## Testing
+
+Every batch runs a set of checks after the gold layer is built. A failure raises, which fails the job task and triggers `fail_batch`, so a broken batch never reaches reporting.
+
+| Check | What it catches |
+|---|---|
+| Surrogate keys unique across all eight gold tables | A join that fanned out |
+| One current row per customer | A broken Type 2 merge |
+| No overlapping version periods | Versions that opened before the previous one closed |
+| Closed versions have an end date, current versions do not | Half-applied merges |
+| Fact row counts match their silver driver | Rows lost or duplicated between layers |
+| No orphaned foreign keys, facts to dimensions | A dimension rebuilt without its facts |
+| Every date key resolves to the calendar | A date outside the generated range |
+| Net revenue reconciles from silver to gold | Anything the row counts missed |
+
+The reconciliation check is the one that matters most. Row counts can match while values are wrong, so the last check recomputes revenue from the silver line items and compares it to the gold total.
+
+📁 [`07-tests/`](07-tests)
+
+## Testing outcome
+
+- Test: Surrogate Keys uniqueness
+
+![Surrogate keys](docs/images/test-sk-unique.png)
+
+- Test: SCT Type 2 integrity
+![scd type 2 integrity](docs/images/test-scd-type2-integrity.png)
+
+- Test: silver match gold
+![silver match gold](docs/images/test-silver-match-fact.png)
+
+- Test: overall test
+![overall test](docs/images/all-tests-checks.png)
 
 
 ---
