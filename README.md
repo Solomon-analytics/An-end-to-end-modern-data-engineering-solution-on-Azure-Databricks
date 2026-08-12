@@ -284,6 +284,7 @@ Star schema built for analysis. Five dimensions, four facts, one bridge.
 - Added derived columns: net line value, GBP conversion, cycle times, date keys, status flags
 - Validated output, then `write_to_gold()` merges on the surrogate key
 
+# Dimensional model
 ![Dimensional model](docs/images/dimensional-model.svg)
 
 ### Date dimension
