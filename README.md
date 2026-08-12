@@ -273,7 +273,7 @@ Star schema built for analysis. Five dimensions, four facts, one bridge.
 - Conformed dimensions, one fact per business event at its own grain
 - Deterministic surrogate keys that survive a rebuild
 - Row count in equals row count out, no fan-out
-- Derived business measures live here, not in silver
+- Derived business measures
 
 **Steps**
 - Checked the grain of every silver source before building anything: business key, uniqueness, null rates
