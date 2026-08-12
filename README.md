@@ -112,7 +112,7 @@ Source systems export monthly. Each export produces a dated batch, and batches a
 
 | # | Aim | Delivered by |
 |---|---|---|
-| 1 | **Data ingestion** | Landing → Bronze, parameterised by batch |
+| 1 | **Data ingestion** | Landing → Bronze, parameterised by batch_id |
 | 2 | **Data transformation** | Bronze → Silver, cleaned and conformed |
 | 3 | **Reporting and analytics** | Silver → Gold, dimensional model |
 | 4 | **Historical accuracy** | Type 2 customer dimension with point-in-time joins |
