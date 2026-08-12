@@ -182,7 +182,7 @@ No `MANAGED LOCATION` on the catalog and no `LOCATION` on the volume, so both us
 
 Folder names mirror the schemas, so the shape of the pipeline is visible from the workspace tree without reading any code.
 
-📁 [`01-environment-setup/`](01-environment-setup)
+📁 [`01-Environment-setup/`](01-Environment-setup)
 
 ---
 
