@@ -531,7 +531,7 @@ The five processing tasks run in sequence: bronze dimensions, bronze facts, silv
 
 `fail_batch` marks the batch `failed` with an error message. Because `identify_next_batch` treats only `in-progress` and `completed` as tracked, a failed batch becomes eligible again on the next run with no manual intervention.
 
-### Worth knowing
+### Additonal information
 
 **`has_batch` is a string, not a boolean.** The condition task compares values as text, so a Python boolean would serialise as `False` with a capital F and the comparison would never match.
 
