@@ -104,7 +104,7 @@ Source systems export monthly. Each export produces a dated batch, and batches a
 
 **Five currencies.** Invoices are raised in the customer's local currency. Group reporting is in sterling, so nothing can be totalled until every value converts at the rate for its invoice month.
 
-**Genuine defects.** Duplicate customer IDs in the master file. Null SKUs on order lines. Order headers with no lines attached. Missing invoice totals. Phone numbers exported from Excel with a leading apostrophe. A missing month in the targets file.
+**Genuine defects.** Duplicate customer IDs in the master file. Null SKUs on order lines. Order headers with no lines attached. Missing invoice totals.
 
 ---
 
