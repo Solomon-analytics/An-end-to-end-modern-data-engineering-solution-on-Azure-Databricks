@@ -29,7 +29,7 @@ kestrel-data-engineering/
 
 Kestrel Global Trading is a London-based B2B distributor. Five thousand trade customers across 40 cities and five regions, moving 1,200 SKUs. It holds and ships stock but does not manufacture, and fulfilment runs through five contracted carriers.
 
-Order, invoice, payment and shipment data arrives as monthly file drops from systems that have never spoken to each other. Analysts rebuild the picture in a spreadsheet each month. It takes a week and breaks when someone is on leave.
+Order, invoice, payment and shipment data arrives as monthly file drops from systems that does not integrate. Analysts rebuild the data in a spreadsheet each month. It takes a week and breaks when someone is on leave.
 
 ---
 
